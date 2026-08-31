@@ -173,8 +173,8 @@ func TestVideosCleanDiscoversAndAppliesEveryClip(t *testing.T) {
 	}
 }
 
-func TestCleanPartialFailureRollsBackAllTouchedClips(t *testing.T) {
-	patchBodies := map[string]map[string]any{}
+func TestCleanPartialFailureRequiresManualRecoveryForTouchedClips(t *testing.T) {
+	patches := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.Method == http.MethodPost && strings.Contains(request.URL.Path, "cl_two"):
@@ -185,7 +185,7 @@ func TestCleanPartialFailureRollsBackAllTouchedClips(t *testing.T) {
 		case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "cl_one"):
 			fmt.Fprint(w, `{"clip":{"cuts":[{"startTimeMs":11,"durationMs":20}]}}`)
 		case request.Method == http.MethodPatch:
-			patchBodies[request.URL.Path] = decodeFixtureBody(t, request)
+			patches++
 			fmt.Fprint(w, `{"clip":{}}`)
 		default:
 			http.Error(w, "unexpected request", http.StatusBadRequest)
@@ -204,18 +204,11 @@ func TestCleanPartialFailureRollsBackAllTouchedClips(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected partial failure")
 	}
-	if result.AppliedOps != 1 || result.FailedOps != 1 || !result.RolledBack || len(result.Rollback) != 1 {
+	if result.AppliedOps != 1 || result.FailedOps != 1 || result.RecoveryComplete || len(result.Recovery) != 1 {
 		t.Fatalf("partial result = %#v", result)
 	}
-	for _, snapshot := range snapshots[:1] {
-		path := fmt.Sprintf("/v1/videos/%s/clips/%s", snapshot.VideoID, snapshot.ClipID)
-		body, ok := patchBodies[path]
-		if !ok || !reflect.DeepEqual(body["cuts"], snapshot.Cuts) {
-			t.Fatalf("rollback %s body = %#v, want cuts %#v", path, body, snapshot.Cuts)
-		}
-	}
-	if _, ok := patchBodies["/v1/videos/vid_one/clips/cl_two"]; ok {
-		t.Fatalf("failed first operation must not roll back unmodified clip: %#v", patchBodies)
+	if patches != 0 || !result.Recovery[0].SafeToRestore || !result.Recovery[0].ManualRestoreRequired {
+		t.Fatalf("automatic restore must not run: patches=%d result=%#v", patches, result)
 	}
 }
 
@@ -239,7 +232,7 @@ func TestCleanFirstFailureDoesNotRollbackUnmodifiedClip(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected first operation to fail")
 	}
-	if patches != 0 || len(result.Rollback) != 0 || result.RolledBack {
+	if patches != 0 || len(result.Recovery) != 0 || result.RecoveryComplete {
 		t.Fatalf("first failure patches=%d result=%#v", patches, result)
 	}
 }

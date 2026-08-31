@@ -16,8 +16,8 @@ func newVideosCleanCmd(flags *rootFlags) *cobra.Command {
 		Short: "Preview or apply a recoverable cleanup pass across every clip in a video",
 		Long: `clean discovers every clip from Tella's official video timeline and plans the
 same guarded cleanup used by videos clips clean. --apply snapshots every clip
-before the first mutation. A partial failure triggers best-effort rollback of
-all clips touched by this invocation.`,
+before the first mutation. A partial failure reports per-clip recovery state and
+keeps snapshots for explicit undo without overwriting cuts automatically.`,
 		Example: `  tella-pp-cli videos clean vid_abc --remove-fillers --remove-silences natural --dry-run
   tella-pp-cli videos clean vid_abc --remove-fillers --remove-silences natural --apply`,
 		Args: cobra.ExactArgs(1),
@@ -31,7 +31,7 @@ all clips touched by this invocation.`,
 				return err
 			}
 			api.DryRun = false
-			api.NoCache = true // every rollback snapshot must come from live state
+			api.NoCache = true // every recovery snapshot must come from live state
 			videoID := args[0]
 			timeline, err := api.Get(fmt.Sprintf("/v1/videos/%s/timeline", videoID), nil)
 			if err != nil {

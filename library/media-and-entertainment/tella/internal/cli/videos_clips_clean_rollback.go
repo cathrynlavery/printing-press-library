@@ -12,34 +12,35 @@ type cleanExpectedCuts struct {
 	Known bool
 }
 
-type cleanRollbackResult struct {
-	VideoID   string `json:"video_id"`
-	ClipID    string `json:"clip_id"`
-	Status    int    `json:"status,omitempty"`
-	Restored  bool   `json:"restored"`
-	Unchanged bool   `json:"unchanged,omitempty"`
-	Conflict  bool   `json:"conflict,omitempty"`
-	Error     string `json:"error,omitempty"`
+type cleanRecoveryResult struct {
+	VideoID               string `json:"video_id"`
+	ClipID                string `json:"clip_id"`
+	Unchanged             bool   `json:"unchanged,omitempty"`
+	SafeToRestore         bool   `json:"safe_to_restore,omitempty"`
+	ManualRestoreRequired bool   `json:"manual_restore_required,omitempty"`
+	Conflict              bool   `json:"conflict,omitempty"`
+	Error                 string `json:"error,omitempty"`
 }
 
 func mutationOutcomeIndeterminate(status int) bool {
 	return status == 0 || status >= 500
 }
 
-func rollbackCleanClips(
+func reconcileCleanRecovery(
 	api cleanAPI,
 	touched []string,
 	snapshots map[string]cutSnapshot,
 	expected map[string]cleanExpectedCuts,
-) []cleanRollbackResult {
-	results := make([]cleanRollbackResult, 0, len(touched))
+) []cleanRecoveryResult {
+	results := make([]cleanRecoveryResult, 0, len(touched))
 	for i := len(touched) - 1; i >= 0; i-- {
 		key := touched[i]
 		snapshot := snapshots[key]
-		item := cleanRollbackResult{VideoID: snapshot.VideoID, ClipID: snapshot.ClipID}
+		item := cleanRecoveryResult{VideoID: snapshot.VideoID, ClipID: snapshot.ClipID}
 		current, err := captureCutSnapshot(api, snapshot.VideoID, snapshot.ClipID)
 		if err != nil {
-			item.Error = fmt.Sprintf("checking current cuts before rollback: %v", err)
+			item.ManualRestoreRequired = true
+			item.Error = fmt.Sprintf("checking current cuts for recovery: %v", err)
 			results = append(results, item)
 			continue
 		}
@@ -52,34 +53,31 @@ func rollbackCleanClips(
 				continue
 			}
 			item.Conflict = true
-			item.Error = "rollback skipped: mutation outcome is indeterminate and current cuts differ from the snapshot"
+			item.ManualRestoreRequired = true
+			item.Error = "manual restore required: mutation outcome is indeterminate and current cuts differ from the snapshot"
 			results = append(results, item)
 			continue
 		}
 		if !reflect.DeepEqual(current.Cuts, state.Cuts) {
 			item.Conflict = true
-			item.Error = "rollback skipped: current cuts changed after this cleanup operation"
+			item.ManualRestoreRequired = true
+			item.Error = "manual restore required: current cuts changed after this cleanup operation"
 			results = append(results, item)
 			continue
 		}
-
-		item.Status, err = restoreCutSnapshot(api, snapshot)
-		if err != nil {
-			item.Error = err.Error()
-		} else {
-			item.Restored = true
-		}
+		item.SafeToRestore = true
+		item.ManualRestoreRequired = true
 		results = append(results, item)
 	}
 	return results
 }
 
-func allRollbacksSucceeded(results []cleanRollbackResult) bool {
+func allRecoveryComplete(results []cleanRecoveryResult) bool {
 	if len(results) == 0 {
 		return false
 	}
 	for _, result := range results {
-		if result.Error != "" {
+		if result.Error != "" || result.ManualRestoreRequired {
 			return false
 		}
 	}

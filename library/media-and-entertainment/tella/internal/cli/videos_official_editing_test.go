@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +159,32 @@ func TestRestoreCutsRejectsSnapshotForAnotherClip(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "snapshot belongs to") {
 		t.Fatalf("restore error = %v", err)
+	}
+}
+
+func TestRestoreCutsApplySendsExactSnapshot(t *testing.T) {
+	var appliedBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		appliedBody = decodeFixtureBody(t, request)
+		fmt.Fprint(w, `{"clip":{"cuts":[]}}`)
+	}))
+	defer server.Close()
+	t.Setenv("TELLA_BASE_URL", server.URL)
+	t.Setenv("TELLA_API_KEY", "fixture")
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	data := []byte(`{"video_id":"vid_one","clip_id":"cl_one","created_at":"2026-08-31T00:00:00Z","cuts":[{"startTimeMs":10,"durationMs":20}]}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	flags := &rootFlags{noCache: true, timeout: 2 * time.Second, configPath: filepath.Join(t.TempDir(), "missing.toml")}
+	cmd := newVideosClipsRestoreCutsCmd(flags)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"vid_one", "cl_one", "--snapshot", path, "--apply"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	want := []any{map[string]any{"startTimeMs": float64(10), "durationMs": float64(20)}}
+	if !reflect.DeepEqual(appliedBody["cuts"], want) {
+		t.Fatalf("restore body = %#v", appliedBody)
 	}
 }

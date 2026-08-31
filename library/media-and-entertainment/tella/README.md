@@ -214,7 +214,7 @@ These capabilities aren't available in any other tool for this API.
     --remove-fillers --remove-silences natural --apply
   ```
 
-  Cleanup snapshots each clip's exact existing cuts before mutation. Manual time ranges are sent together in one `cut_clip` request so earlier cuts cannot shift later coordinates. A failed compound apply re-fetches each touched clip and restores it only when its cuts still match this invocation's last confirmed result. Concurrent or indeterminate changes produce a rollback conflict instead of being overwritten; the saved snapshot remains available through `videos clips undo-last-cuts <vid> <clipId> --apply` for an explicit restore.
+  Cleanup snapshots each clip's exact existing cuts before mutation. Manual time ranges are sent together in one `cut_clip` request so earlier cuts cannot shift later coordinates. Because Tella exposes no conditional cut update, a failed compound apply never restores automatically: it re-fetches touched clips, reports whether their state is unchanged, safely restorable, indeterminate, or conflicting, and leaves the saved snapshot for an explicit `videos clips undo-last-cuts <vid> <clipId> --apply` after review.
 
   Tella's official silence modes are `natural` (pauses longer than 800ms), `fast` (>500ms), and `faster` (>300ms). `--remove-buffers` remains available for backward compatibility and preserves the older threshold-based composition (`--buffer-min-ms`, default 200ms), so it is more aggressive than official `faster`; choose one or the other.
 

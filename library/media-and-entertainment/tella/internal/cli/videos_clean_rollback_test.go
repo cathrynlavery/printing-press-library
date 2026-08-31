@@ -33,7 +33,7 @@ func TestCleanIndeterminateMutationReportsConflictWithoutOverwrite(t *testing.T)
 	if err == nil {
 		t.Fatal("expected truncated response to fail")
 	}
-	if patches != 0 || len(result.Rollback) != 1 || !result.Rollback[0].Conflict || result.RolledBack {
+	if patches != 0 || len(result.Recovery) != 1 || !result.Recovery[0].Conflict || !result.Recovery[0].ManualRestoreRequired || result.RecoveryComplete {
 		t.Fatalf("indeterminate result patches=%d result=%#v", patches, result)
 	}
 }
@@ -65,7 +65,7 @@ func TestCleanRollbackSkipsInterveningExternalCuts(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "remove-silences") {
 		t.Fatalf("apply error = %v", err)
 	}
-	if patches != 0 || len(result.Rollback) != 1 || !result.Rollback[0].Conflict || result.RolledBack {
+	if patches != 0 || len(result.Recovery) != 1 || !result.Recovery[0].Conflict || !result.Recovery[0].ManualRestoreRequired || result.RecoveryComplete {
 		t.Fatalf("external-edit result patches=%d result=%#v", patches, result)
 	}
 }

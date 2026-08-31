@@ -98,7 +98,7 @@ These capabilities aren't available in any other tool for this API.
     --remove-fillers --remove-silences natural --apply
   ```
 
-  `clean` snapshots existing cuts before applying and batches manual playback ranges. After a partial failure it re-fetches touched clips and restores only those still matching this invocation's last confirmed cut set. It reports a conflict instead of overwriting concurrent or indeterminate changes; explicitly restore the saved snapshot later with `videos clips undo-last-cuts <vid> <clipId> --apply` after review.
+  `clean` snapshots existing cuts before applying and batches manual playback ranges. Tella has no conditional cut update, so partial failures never auto-restore: the CLI re-fetches touched clips, reports recovery state, and keeps each snapshot. Review the result, then explicitly run `videos clips undo-last-cuts <vid> <clipId> --apply` when restoration is appropriate.
 
   Official silence modes are `natural` (>800ms), `fast` (>500ms), and `faster` (>300ms). Legacy `--remove-buffers` remains supported with its exact `--buffer-min-ms` threshold (default 200ms), which is more aggressive than official `faster`; do not pass both options.
 

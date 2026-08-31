@@ -32,7 +32,8 @@ func newVideosClipsCleanCmd(flags *rootFlags) *cobra.Command {
 		Long: `clean composes Tella's public cut, transcript-cut, filler, and silence tools.
 
 The default is a read-only preview. --apply snapshots the exact existing cuts
-before mutation. If any step fails, clean attempts to restore that snapshot.
+before mutation. If any step fails, clean reports recovery state and keeps the
+snapshot for an explicit undo; it never overwrites cuts automatically.
 
 --find-mistakes remains an explicit unofficial, cookie-authenticated feature;
 detected ranges are applied through the official batched cut endpoint.`,

@@ -139,11 +139,11 @@ type cleanOpResult struct {
 }
 
 type cleanApplyResult struct {
-	AppliedOps int                   `json:"applied_ops"`
-	FailedOps  int                   `json:"failed_ops"`
-	Operations []cleanOpResult       `json:"operations"`
-	RolledBack bool                  `json:"rolled_back"`
-	Rollback   []cleanRollbackResult `json:"rollback,omitempty"`
+	AppliedOps       int                   `json:"applied_ops"`
+	FailedOps        int                   `json:"failed_ops"`
+	Operations       []cleanOpResult       `json:"operations"`
+	RecoveryComplete bool                  `json:"recovery_complete"`
+	Recovery         []cleanRecoveryResult `json:"recovery,omitempty"`
 }
 
 func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapshot) (cleanApplyResult, error) {
@@ -180,8 +180,8 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 				seenTouched[key] = true
 				expectedCuts[key] = cleanExpectedCuts{}
 			}
-			result.Rollback = rollbackCleanClips(api, touched, snapshotByClip, expectedCuts)
-			result.RolledBack = allRollbacksSucceeded(result.Rollback)
+			result.Recovery = reconcileCleanRecovery(api, touched, snapshotByClip, expectedCuts)
+			result.RecoveryComplete = allRecoveryComplete(result.Recovery)
 			return result, fmt.Errorf("clean failed for video %s clip %s operation %s: %w", plan.VideoID, plan.ClipID, operation.Op, err)
 		}
 	}

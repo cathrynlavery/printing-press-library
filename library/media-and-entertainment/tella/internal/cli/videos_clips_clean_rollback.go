@@ -13,13 +13,13 @@ type cleanExpectedCuts struct {
 }
 
 type cleanRecoveryResult struct {
-	VideoID               string `json:"video_id"`
-	ClipID                string `json:"clip_id"`
-	Unchanged             bool   `json:"unchanged,omitempty"`
-	SafeToRestore         bool   `json:"safe_to_restore,omitempty"`
-	ManualRestoreRequired bool   `json:"manual_restore_required,omitempty"`
-	Conflict              bool   `json:"conflict,omitempty"`
-	Error                 string `json:"error,omitempty"`
+	VideoID                string `json:"video_id"`
+	ClipID                 string `json:"clip_id"`
+	Unchanged              bool   `json:"unchanged,omitempty"`
+	CurrentMatchesExpected bool   `json:"current_matches_expected,omitempty"`
+	ManualRestoreRequired  bool   `json:"manual_restore_required,omitempty"`
+	Conflict               bool   `json:"conflict,omitempty"`
+	Error                  string `json:"error,omitempty"`
 }
 
 func mutationOutcomeIndeterminate(status int) bool {
@@ -65,7 +65,7 @@ func reconcileCleanRecovery(
 			results = append(results, item)
 			continue
 		}
-		item.SafeToRestore = true
+		item.CurrentMatchesExpected = true
 		item.ManualRestoreRequired = true
 		results = append(results, item)
 	}

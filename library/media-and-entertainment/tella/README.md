@@ -214,7 +214,7 @@ These capabilities aren't available in any other tool for this API.
     --remove-fillers --remove-silences natural --apply
   ```
 
-  Cleanup snapshots each clip's exact existing cuts before mutation and records the last known post-clean cuts returned by Tella. Manual time ranges are sent together in one `cut_clip` request so earlier cuts cannot shift later coordinates. Because Tella exposes no conditional cut update, a failed compound apply never restores automatically: it re-fetches touched clips, reports whether their state is unchanged, matches the last known cleanup result, is indeterminate, or conflicts. Explicit `videos clips undo-last-cuts <vid> <clipId> --apply` also re-fetches the clip and refuses to restore if its cuts diverged from that recorded post-clean state. Tella has no server-side revision precondition, so do not run an undo while another editor is saving the same clip.
+  Cleanup snapshots each clip's exact existing cuts before mutation and records the last known post-clean cuts returned by Tella. Manual time ranges are sent together in one `cut_clip` request so earlier cuts cannot shift later coordinates. Because Tella exposes no conditional cut update, a failed compound apply never restores automatically: it re-fetches touched clips, reports whether their state is unchanged, matches the last known cleanup result, is indeterminate, or conflicts. Explicit undo re-fetches the clip and refuses if its cuts diverged from that recorded post-clean state. This is an advisory read-time check, not an atomic server guarantee: snapshot restore apply requires `--confirm-exclusive-editing`, which you must pass only after ensuring nobody else can save that clip until the command finishes.
 
   Tella's official silence modes are `natural` (pauses longer than 800ms), `fast` (>500ms), and `faster` (>300ms). `--remove-buffers` remains available for backward compatibility and preserves the older threshold-based composition (`--buffer-min-ms`, default 200ms), so it is more aggressive than official `faster`; choose one or the other.
 
@@ -312,19 +312,24 @@ tella-pp-cli videos clips insert-file vid_abc intro.mp4 --width 1920 --height 10
 # Upload B-roll and attach it as layout media over a time range.
 tella-pp-cli videos clips add-broll vid_abc cl_xyz broll.mp4 --width 1920 --height 1080 --duration 8.2 --start-ms 4000 --duration-ms 6000 --dry-run
 
-# Read the full outline, clean a clip, then restore only if its cuts have not diverged.
+# Read the full outline, clean a clip, then inspect the recovery preview.
 tella-pp-cli videos timeline vid_abc --include cuts,words --json
 tella-pp-cli videos clips clean vid_abc cl_xyz --remove-fillers --remove-silences natural --dry-run
 tella-pp-cli videos clips clean vid_abc cl_xyz --remove-fillers --remove-silences natural --apply
-tella-pp-cli videos clips undo-last-cuts vid_abc cl_xyz --apply
+tella-pp-cli videos clips undo-last-cuts vid_abc cl_xyz --dry-run
+
+# Apply undo only while you have exclusive editing access to this clip.
+tella-pp-cli videos clips undo-last-cuts vid_abc cl_xyz --apply --confirm-exclusive-editing
 
 # Inspect edit substrate, then cut transcript words or replace word ranges.
 tella-pp-cli videos clips silence-map vid_abc cl_xyz --json
 tella-pp-cli videos clips cut-words vid_abc cl_xyz --term "mistake" --dry-run
 tella-pp-cli videos clips replace-word-ranges vid_abc cl_xyz --word-ranges '[{"fromWordIndex":12,"toWordIndex":17}]' --dry-run
 
-# Restore inline cuts explicitly, or use --snapshot for the guarded divergence check.
+# Restore inline cuts explicitly, or preview a snapshot's advisory divergence check.
 tella-pp-cli videos clips restore-cuts vid_abc cl_xyz --cuts '[{"startTimeMs":100,"durationMs":150}]' --dry-run
+tella-pp-cli videos clips restore-cuts vid_abc cl_xyz --snapshot cuts.json --dry-run
+tella-pp-cli videos clips restore-cuts vid_abc cl_xyz --snapshot cuts.json --apply --confirm-exclusive-editing
 
 # Adjust documented per-clip audio tracks. "inherit" clears an override.
 tella-pp-cli videos clips update vid_abc cl_xyz --microphone-volume 0.8 --system-audio-volume 0 --dry-run

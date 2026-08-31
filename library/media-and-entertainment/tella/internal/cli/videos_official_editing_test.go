@@ -186,13 +186,43 @@ func TestRestoreCutsApplySendsExactSnapshot(t *testing.T) {
 	flags := &rootFlags{noCache: true, timeout: 2 * time.Second, configPath: filepath.Join(t.TempDir(), "missing.toml")}
 	cmd := newVideosClipsRestoreCutsCmd(flags)
 	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetArgs([]string{"vid_one", "cl_one", "--snapshot", path, "--apply"})
+	cmd.SetArgs([]string{"vid_one", "cl_one", "--snapshot", path, "--apply", "--confirm-exclusive-editing"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	want := []any{map[string]any{"startTimeMs": float64(10), "durationMs": float64(20)}}
 	if patches != 1 || !reflect.DeepEqual(appliedBody["cuts"], want) {
 		t.Fatalf("patches=%d restore body = %#v", patches, appliedBody)
+	}
+}
+
+func TestRestoreCutsRequiresExclusiveEditingConfirmation(t *testing.T) {
+	patches := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodPatch {
+			patches++
+		}
+		fmt.Fprint(w, `{"clip":{"cuts":[{"startTimeMs":40,"durationMs":50}]}}`)
+	}))
+	defer server.Close()
+	t.Setenv("TELLA_BASE_URL", server.URL)
+	t.Setenv("TELLA_API_KEY", "fixture")
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	data := []byte(`{"video_id":"vid_one","clip_id":"cl_one","created_at":"2026-08-31T00:00:00Z","cuts":[],"expected_cuts":[{"startTimeMs":40,"durationMs":50}]}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	flags := &rootFlags{noCache: true, timeout: 2 * time.Second, configPath: filepath.Join(t.TempDir(), "missing.toml")}
+	cmd := newVideosClipsRestoreCutsCmd(flags)
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetArgs([]string{"vid_one", "cl_one", "--snapshot", path, "--apply"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--confirm-exclusive-editing") {
+		t.Fatalf("restore error = %v", err)
+	}
+	if patches != 0 || !strings.Contains(output.String(), `"conditional_write_supported": false`) {
+		t.Fatalf("patches=%d output=%s", patches, output.String())
 	}
 }
 
@@ -244,7 +274,7 @@ func TestUndoRefusesLegacySnapshotWithoutExpectedCuts(t *testing.T) {
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetArgs([]string{"vid_one", "cl_one", "--snapshot", path, "--apply"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "guarded restore is unavailable") {
+	if err == nil || !strings.Contains(err.Error(), "snapshot restore is unavailable") {
 		t.Fatalf("undo error = %v", err)
 	}
 	if requests != 0 {

@@ -5,7 +5,7 @@
   "base_run_id": "20260509-180956",
   "base_printing_press_version": "4.2.1",
   "summary": "Re-discover Tella's public editing schema during regeneration and preserve preview-first, additive, snapshot-backed clip and video cleanup workflows.",
-  "reason": "Tella's public API evolves faster than this CLI's archived spec: timeline/transcript reads, official silence modes, transcript corrections, audio overrides, Studio Voice (the API's studioSound field), and additive resource batches are now supported, while Find Mistakes and whole-clip mute are still not public. Compound cuts must be batched against one playback timeline. Because no conditional cut update exists, failures must report recovery state instead of restoring automatically; snapshots must retain both pre-clean and last-known post-clean cuts so explicit undo refuses after divergence. apply_video_edits must never be treated as a cut API.",
+  "reason": "Tella's public API evolves faster than this CLI's archived spec: timeline/transcript reads, official silence modes, transcript corrections, audio overrides, Studio Voice (the API's studioSound field), and additive resource batches are now supported, while Find Mistakes and whole-clip mute are still not public. Compound cuts must be batched against one playback timeline. Because no conditional cut update exists, failures must report recovery state instead of restoring automatically; snapshots must retain both pre-clean and last-known post-clean cuts so explicit undo refuses after divergence and requires an exclusive-editing confirmation. apply_video_edits must never be treated as a cut API.",
   "files": [
     "internal/cli/videos.go",
     "internal/cli/videos_apply-edits.go",
@@ -32,5 +32,5 @@
     "README.md",
     "SKILL.md"
   ],
-  "validated_outcome": "Go 1.26.6 test, vet, build, and govulncheck pass; verify-skill passes; HTTP fixtures cover official payloads, multiple clips, existing cuts, dry-run, apply, explicit restore, partial failure, indeterminate responses, and concurrent-edit conflicts. Credential-dependent live Tella mutation checks remain explicitly unverified."
+  "validated_outcome": "Go 1.26.6 test, vet, build, and govulncheck pass; verify-skill passes; HTTP fixtures cover official payloads, multiple clips, existing cuts, dry-run, apply, explicit restore, partial failure, indeterminate responses, advisory divergence checks, and required exclusive-editing confirmation. Credential-dependent live Tella mutation checks remain explicitly unverified."
 }

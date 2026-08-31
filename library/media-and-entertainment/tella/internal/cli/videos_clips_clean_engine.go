@@ -191,7 +191,15 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 				expectedCuts[key] = cleanExpectedCuts{}
 			}
 			if mutationOutcomeIndeterminate(status) {
-				snapshots[snapshotPosition].ExpectedCuts = nil
+				// Keep the last known post-clean state when an earlier operation on
+				// this clip succeeded. Recovery re-fetches the clip and only offers
+				// undo when the live cuts still match this value. With no earlier
+				// success, the mutation outcome is genuinely unknown.
+				if state := expectedCuts[key]; state.Known {
+					snapshots[snapshotPosition].ExpectedCuts = state.Cuts
+				} else {
+					snapshots[snapshotPosition].ExpectedCuts = nil
+				}
 			}
 			result.Recovery = reconcileCleanRecovery(api, touched, snapshotByClip, expectedCuts)
 			result.RecoveryComplete = allRecoveryComplete(result.Recovery)

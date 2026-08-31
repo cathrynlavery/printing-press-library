@@ -211,7 +211,7 @@ func TestCleanPartialFailureRequiresManualRecoveryForTouchedClips(t *testing.T) 
 	if result.AppliedOps != 1 || result.FailedOps != 1 || result.RecoveryComplete || len(result.Recovery) != 1 {
 		t.Fatalf("partial result = %#v", result)
 	}
-	if patches != 0 || !result.Recovery[0].SafeToRestore || !result.Recovery[0].ManualRestoreRequired {
+	if patches != 0 || !result.Recovery[0].CurrentMatchesExpected || !result.Recovery[0].ManualRestoreRequired {
 		t.Fatalf("automatic restore must not run: patches=%d result=%#v", patches, result)
 	}
 }

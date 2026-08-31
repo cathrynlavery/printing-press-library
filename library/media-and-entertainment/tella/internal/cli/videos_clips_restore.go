@@ -5,16 +5,42 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/spf13/cobra"
 )
+
+type snapshotRestoreCheck struct {
+	CurrentCuts  any    `json:"current_cuts,omitempty"`
+	ExpectedCuts any    `json:"expected_cuts,omitempty"`
+	Safe         bool   `json:"safe_to_restore"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+func inspectSnapshotRestore(api cleanAPI, snapshot cutSnapshot) (snapshotRestoreCheck, error) {
+	check := snapshotRestoreCheck{ExpectedCuts: snapshot.ExpectedCuts}
+	if snapshot.ExpectedCuts == nil {
+		check.Reason = "snapshot has no expected post-clean cuts; guarded restore is unavailable"
+		return check, nil
+	}
+	current, err := captureCutSnapshot(api, snapshot.VideoID, snapshot.ClipID)
+	if err != nil {
+		return check, err
+	}
+	check.CurrentCuts = current.Cuts
+	check.Safe = reflect.DeepEqual(current.Cuts, snapshot.ExpectedCuts)
+	if !check.Safe {
+		check.Reason = "current cuts differ from the snapshot's expected post-clean state"
+	}
+	return check, nil
+}
 
 func newVideosClipsUndoLastCutsCmd(flags *rootFlags) *cobra.Command {
 	var snapshotPath string
 	var apply bool
 	cmd := &cobra.Command{
 		Use:     "undo-last-cuts <id> <clipId>",
-		Short:   "Restore the most recent cuts snapshot saved before a clean/apply workflow",
+		Short:   "Restore the latest clean snapshot only when current cuts have not diverged",
 		Example: "  tella-pp-cli videos clips undo-last-cuts vid_abc cl_xyz --apply",
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -34,15 +60,30 @@ func newVideosClipsUndoLastCutsCmd(flags *rootFlags) *cobra.Command {
 			if snapshot.VideoID != videoID || snapshot.ClipID != clipID {
 				return usageErr(fmt.Errorf("snapshot belongs to video %s clip %s, not %s/%s", snapshot.VideoID, snapshot.ClipID, videoID, clipID))
 			}
-			result := map[string]any{"video_id": videoID, "clip_id": clipID, "snapshot": path, "body": map[string]any{"cuts": snapshot.Cuts}}
+			api, err := flags.newClient()
+			if err != nil {
+				return err
+			}
+			api.DryRun = false
+			api.NoCache = true
+			check, err := inspectSnapshotRestore(api, snapshot)
+			if err != nil {
+				return classifyAPIError(err, flags)
+			}
+			result := map[string]any{
+				"video_id": videoID, "clip_id": clipID, "snapshot": path,
+				"body": map[string]any{"cuts": snapshot.Cuts}, "restore_check": check,
+			}
 			if flags.dryRun || !apply {
 				result["dry_run"] = true
 				result["applied"] = false
 				return printJSONFiltered(cmd.OutOrStdout(), result, flags)
 			}
-			api, err := flags.newClient()
-			if err != nil {
-				return err
+			if !check.Safe {
+				if err := printJSONFiltered(cmd.OutOrStdout(), result, flags); err != nil {
+					return err
+				}
+				return usageErr(fmt.Errorf("refusing snapshot restore: %s", check.Reason))
 			}
 			status, err := restoreCutSnapshot(api, snapshot)
 			if err != nil {
@@ -55,7 +96,7 @@ func newVideosClipsUndoLastCutsCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&snapshotPath, "snapshot", "", "Snapshot JSON path; defaults to latest snapshot for the clip")
-	cmd.Flags().BoolVar(&apply, "apply", false, "Actually restore cuts; default prints request body")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Restore only when current cuts match the snapshot's expected post-clean state")
 	return cmd
 }
 
@@ -71,15 +112,18 @@ func newVideosClipsRestoreCutsCmd(flags *rootFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			videoID, clipID := args[0], args[1]
 			var cuts any
+			var snapshot *cutSnapshot
+			var api cleanAPI
 			if snapshotPath != "" {
-				snapshot, err := readCutSnapshot(snapshotPath)
+				loaded, err := readCutSnapshot(snapshotPath)
 				if err != nil {
 					return err
 				}
-				if snapshot.VideoID != videoID || snapshot.ClipID != clipID {
-					return usageErr(fmt.Errorf("snapshot belongs to video %s clip %s, not %s/%s", snapshot.VideoID, snapshot.ClipID, videoID, clipID))
+				if loaded.VideoID != videoID || loaded.ClipID != clipID {
+					return usageErr(fmt.Errorf("snapshot belongs to video %s clip %s, not %s/%s", loaded.VideoID, loaded.ClipID, videoID, clipID))
 				}
-				cuts = snapshot.Cuts
+				snapshot = &loaded
+				cuts = loaded.Cuts
 			} else {
 				if cutsJSON == "" {
 					return usageErr(fmt.Errorf("pass --cuts JSON or --snapshot <path>"))
@@ -95,15 +139,36 @@ func newVideosClipsRestoreCutsCmd(flags *rootFlags) *cobra.Command {
 			result := map[string]any{"video_id": videoID, "clip_id": clipID, "body": body}
 			if snapshotPath != "" {
 				result["snapshot"] = snapshotPath
+				client, err := flags.newClient()
+				if err != nil {
+					return err
+				}
+				client.DryRun = false
+				client.NoCache = true
+				api = client
+				check, err := inspectSnapshotRestore(api, *snapshot)
+				if err != nil {
+					return classifyAPIError(err, flags)
+				}
+				result["restore_check"] = check
+				if apply && !flags.dryRun && !check.Safe {
+					if err := printJSONFiltered(cmd.OutOrStdout(), result, flags); err != nil {
+						return err
+					}
+					return usageErr(fmt.Errorf("refusing snapshot restore: %s", check.Reason))
+				}
 			}
 			if flags.dryRun || !apply {
 				result["dry_run"] = true
 				result["applied"] = false
 				return printJSONFiltered(cmd.OutOrStdout(), result, flags)
 			}
-			api, err := flags.newClient()
-			if err != nil {
-				return err
+			if api == nil {
+				client, err := flags.newClient()
+				if err != nil {
+					return err
+				}
+				api = client
 			}
 			_, status, err := api.Patch(fmt.Sprintf("/v1/videos/%s/clips/%s", videoID, clipID), body)
 			if err != nil {
@@ -117,6 +182,6 @@ func newVideosClipsRestoreCutsCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&cutsJSON, "cuts", "", "Exact stored cuts JSON array to restore")
 	cmd.Flags().StringVar(&snapshotPath, "snapshot", "", "Snapshot JSON path to restore")
-	cmd.Flags().BoolVar(&apply, "apply", false, "Actually restore cuts; default prints request body")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Restore cuts; snapshot restores refuse when current cuts diverge")
 	return cmd
 }

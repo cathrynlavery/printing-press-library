@@ -4,6 +4,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -84,6 +85,7 @@ keeps snapshots for explicit undo without overwriting cuts automatically.`,
 				snapshotPaths[snapshot.ClipID] = path
 			}
 			applyResult, applyErr := applyCleanPlans(api, plans, snapshots)
+			applyErr = errors.Join(applyErr, updateCutSnapshotFiles(snapshotPaths, snapshots))
 			result["dry_run"] = false
 			result["applied"] = applyErr == nil
 			result["snapshots"] = snapshotPaths

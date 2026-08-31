@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -76,7 +77,9 @@ detected ranges are applied through the official batched cut endpoint.`,
 			if err != nil {
 				return fmt.Errorf("saving pre-clean cuts snapshot: %w", err)
 			}
-			applyResult, applyErr := applyCleanPlans(api, []cleanClipPlan{plan}, []cutSnapshot{snapshot})
+			snapshots := []cutSnapshot{snapshot}
+			applyResult, applyErr := applyCleanPlans(api, []cleanClipPlan{plan}, snapshots)
+			applyErr = errors.Join(applyErr, updateCutSnapshotFiles(map[string]string{snapshot.ClipID: snapshotPath}, snapshots))
 			result["dry_run"] = false
 			result["applied"] = applyErr == nil
 			result["snapshot"] = snapshotPath

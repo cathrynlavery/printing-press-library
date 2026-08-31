@@ -149,7 +149,9 @@ type cleanApplyResult struct {
 func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapshot) (cleanApplyResult, error) {
 	result := cleanApplyResult{Operations: []cleanOpResult{}}
 	snapshotByClip := make(map[string]cutSnapshot, len(snapshots))
-	for _, snapshot := range snapshots {
+	snapshotIndex := make(map[string]int, len(snapshots))
+	for i, snapshot := range snapshots {
+		snapshotIndex[cleanClipKey(snapshot.VideoID, snapshot.ClipID)] = i
 		snapshotByClip[cleanClipKey(snapshot.VideoID, snapshot.ClipID)] = snapshot
 	}
 	touched := []string{}
@@ -159,6 +161,10 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 	for _, plan := range plans {
 		for _, operation := range plan.Operations {
 			key := cleanClipKey(plan.VideoID, plan.ClipID)
+			snapshotPosition, ok := snapshotIndex[key]
+			if !ok {
+				return result, fmt.Errorf("clean plan for video %s clip %s has no recovery snapshot", plan.VideoID, plan.ClipID)
+			}
 			data, status, err := applyCleanOperation(api, plan.VideoID, plan.ClipID, operation)
 			opResult := cleanOpResult{VideoID: plan.VideoID, ClipID: plan.ClipID, Op: operation.Op, Status: status}
 			if err == nil {
@@ -168,6 +174,10 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 				}
 				cuts, cutsErr := clipCutsFromResponse(data)
 				expectedCuts[key] = cleanExpectedCuts{Cuts: cuts, Known: cutsErr == nil}
+				snapshots[snapshotPosition].ExpectedCuts = nil
+				if cutsErr == nil {
+					snapshots[snapshotPosition].ExpectedCuts = cuts
+				}
 				result.AppliedOps++
 				result.Operations = append(result.Operations, opResult)
 				continue
@@ -179,6 +189,9 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 				touched = append(touched, key)
 				seenTouched[key] = true
 				expectedCuts[key] = cleanExpectedCuts{}
+			}
+			if mutationOutcomeIndeterminate(status) {
+				snapshots[snapshotPosition].ExpectedCuts = nil
 			}
 			result.Recovery = reconcileCleanRecovery(api, touched, snapshotByClip, expectedCuts)
 			result.RecoveryComplete = allRecoveryComplete(result.Recovery)

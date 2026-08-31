@@ -4,6 +4,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,10 +13,11 @@ import (
 )
 
 type cutSnapshot struct {
-	VideoID   string    `json:"video_id"`
-	ClipID    string    `json:"clip_id"`
-	CreatedAt time.Time `json:"created_at"`
-	Cuts      any       `json:"cuts"`
+	VideoID      string    `json:"video_id"`
+	ClipID       string    `json:"clip_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	Cuts         any       `json:"cuts"`
+	ExpectedCuts any       `json:"expected_cuts,omitempty"`
 }
 
 func captureCutSnapshot(api cleanAPI, videoID, clipID string) (cutSnapshot, error) {
@@ -66,14 +68,46 @@ func persistCutSnapshot(snapshot cutSnapshot) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, snapshot.CreatedAt.Format("20060102T150405.000000000Z")+".json")
+	return path, writeCutSnapshot(path, snapshot)
+}
+
+func writeCutSnapshot(path string, snapshot cutSnapshot) error {
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
-		return "", err
+		return err
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
-		return "", err
+	temp, err := os.CreateTemp(filepath.Dir(path), ".cut-snapshot-*.json")
+	if err != nil {
+		return err
 	}
-	return path, nil
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.Write(append(data, '\n')); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
+}
+
+func updateCutSnapshotFiles(paths map[string]string, snapshots []cutSnapshot) error {
+	var errs []error
+	for _, snapshot := range snapshots {
+		path := paths[snapshot.ClipID]
+		if path == "" {
+			continue
+		}
+		if err := writeCutSnapshot(path, snapshot); err != nil {
+			errs = append(errs, fmt.Errorf("updating recovery snapshot for clip %s: %w", snapshot.ClipID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func restoreCutSnapshot(api cleanAPI, snapshot cutSnapshot) (int, error) {
@@ -98,6 +132,11 @@ func readCutSnapshot(path string) (cutSnapshot, error) {
 	}
 	if _, ok := snapshot.Cuts.([]any); !ok {
 		return cutSnapshot{}, fmt.Errorf("cuts snapshot %s does not contain a cuts array", path)
+	}
+	if snapshot.ExpectedCuts != nil {
+		if _, ok := snapshot.ExpectedCuts.([]any); !ok {
+			return cutSnapshot{}, fmt.Errorf("cuts snapshot %s does not contain an expected_cuts array", path)
+		}
 	}
 	return snapshot, nil
 }

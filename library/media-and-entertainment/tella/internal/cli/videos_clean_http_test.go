@@ -74,12 +74,16 @@ func TestCleanPlanAndApplyUsesOfficialBatchPayloads(t *testing.T) {
 	if len(existing) != 1 || plan.ExistingCuts == nil {
 		t.Fatalf("existing cuts not preserved in snapshot/plan: %#v %#v", snapshot.Cuts, plan.ExistingCuts)
 	}
-	result, err := applyCleanPlans(api, []cleanClipPlan{plan}, []cutSnapshot{snapshot})
+	snapshots := []cutSnapshot{snapshot}
+	result, err := applyCleanPlans(api, []cleanClipPlan{plan}, snapshots)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.AppliedOps != 4 || result.FailedOps != 0 {
 		t.Fatalf("apply result = %#v", result)
+	}
+	if !reflect.DeepEqual(snapshots[0].ExpectedCuts, snapshot.Cuts) {
+		t.Fatalf("expected post-clean cuts = %#v, want %#v", snapshots[0].ExpectedCuts, snapshot.Cuts)
 	}
 	wantPaths := []string{
 		"/v1/videos/vid_one/clips/cl_one/cut",

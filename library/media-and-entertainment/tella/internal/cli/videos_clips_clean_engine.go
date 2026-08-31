@@ -1,0 +1,236 @@
+// Copyright 2026 Greg Ceccarelli and contributors. Licensed under Apache-2.0. See LICENSE.
+
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strconv"
+)
+
+type cleanAPI interface {
+	Get(path string, params map[string]string) (json.RawMessage, error)
+	Post(path string, body any) (json.RawMessage, int, error)
+	Patch(path string, body any) (json.RawMessage, int, error)
+}
+
+type cleanRange struct {
+	FromMs int `json:"fromMs"`
+	ToMs   int `json:"toMs"`
+}
+
+type cleanWordRange struct {
+	FromWordIndex int `json:"fromWordIndex"`
+	ToWordIndex   int `json:"toWordIndex"`
+}
+
+type cleanOptions struct {
+	RemoveFillers  bool
+	RemoveBuffers  bool
+	RemoveSilences string
+	TrimEdges      bool
+	BufferMinMs    int
+	TimeRanges     []cleanRange
+	WordRanges     []cleanWordRange
+}
+
+type cleanOperation struct {
+	Op         string           `json:"op"`
+	Cuts       []cleanRange     `json:"cuts,omitempty"`
+	WordRanges []cleanWordRange `json:"word_ranges,omitempty"`
+	Mode       string           `json:"mode,omitempty"`
+}
+
+type cleanClipPlan struct {
+	VideoID      string           `json:"video_id"`
+	ClipID       string           `json:"clip_id"`
+	ExistingCuts any              `json:"existing_cuts"`
+	Operations   []cleanOperation `json:"operations"`
+}
+
+func planCleanClip(api cleanAPI, videoID, clipID string, opts cleanOptions) (cleanClipPlan, cutSnapshot, error) {
+	plan := cleanClipPlan{VideoID: videoID, ClipID: clipID, Operations: []cleanOperation{}}
+	snapshot, err := captureCutSnapshot(api, videoID, clipID)
+	if err != nil {
+		return plan, cutSnapshot{}, err
+	}
+	plan.ExistingCuts = snapshot.Cuts
+
+	timeCuts := append([]cleanRange(nil), opts.TimeRanges...)
+	if opts.RemoveBuffers || opts.TrimEdges {
+		minimum := opts.BufferMinMs
+		if opts.TrimEdges {
+			minimum = 0
+		}
+		silenceData, getErr := api.Get(
+			fmt.Sprintf("/v1/videos/%s/clips/%s/silences", videoID, clipID),
+			map[string]string{"minDurationMs": strconv.Itoa(minimum)},
+		)
+		if getErr != nil {
+			return plan, snapshot, getErr
+		}
+		silences := extractSilenceRanges(silenceData)
+		if opts.RemoveBuffers {
+			for _, silence := range silences {
+				if silence.End-silence.Start >= opts.BufferMinMs {
+					timeCuts = append(timeCuts, cleanRange{FromMs: silence.Start, ToMs: silence.End})
+				}
+			}
+		}
+		if opts.TrimEdges && len(silences) > 0 {
+			durationMs, durationErr := fetchClipDurationMs(api, videoID, clipID)
+			if durationErr != nil {
+				return plan, snapshot, durationErr
+			}
+			head, tail := pickBufferRanges(silences, durationMs)
+			if head != nil {
+				timeCuts = append(timeCuts, cleanRange{FromMs: head.Start, ToMs: head.End})
+			}
+			if tail != nil {
+				timeCuts = append(timeCuts, cleanRange{FromMs: tail.Start, ToMs: tail.End})
+			}
+		}
+	}
+	if timeCuts = mergeCleanRanges(timeCuts); len(timeCuts) > 0 {
+		plan.Operations = append(plan.Operations, cleanOperation{Op: "cut", Cuts: timeCuts})
+	}
+	if len(opts.WordRanges) > 0 {
+		plan.Operations = append(plan.Operations, cleanOperation{Op: "cut-by-transcript", WordRanges: opts.WordRanges})
+	}
+	if opts.RemoveFillers {
+		plan.Operations = append(plan.Operations, cleanOperation{Op: "remove-fillers"})
+	}
+	if opts.RemoveSilences != "" {
+		plan.Operations = append(plan.Operations, cleanOperation{Op: "remove-silences", Mode: opts.RemoveSilences})
+	}
+	return plan, snapshot, nil
+}
+
+func mergeCleanRanges(ranges []cleanRange) []cleanRange {
+	if len(ranges) == 0 {
+		return nil
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		if ranges[i].FromMs == ranges[j].FromMs {
+			return ranges[i].ToMs < ranges[j].ToMs
+		}
+		return ranges[i].FromMs < ranges[j].FromMs
+	})
+	merged := make([]cleanRange, 0, len(ranges))
+	for _, current := range ranges {
+		if len(merged) == 0 || current.FromMs > merged[len(merged)-1].ToMs {
+			merged = append(merged, current)
+			continue
+		}
+		if current.ToMs > merged[len(merged)-1].ToMs {
+			merged[len(merged)-1].ToMs = current.ToMs
+		}
+	}
+	return merged
+}
+
+type cleanOpResult struct {
+	VideoID string `json:"video_id"`
+	ClipID  string `json:"clip_id"`
+	Op      string `json:"op"`
+	Status  int    `json:"status,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type cleanRollbackResult struct {
+	VideoID string `json:"video_id"`
+	ClipID  string `json:"clip_id"`
+	Status  int    `json:"status,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type cleanApplyResult struct {
+	AppliedOps int                   `json:"applied_ops"`
+	FailedOps  int                   `json:"failed_ops"`
+	Operations []cleanOpResult       `json:"operations"`
+	RolledBack bool                  `json:"rolled_back"`
+	Rollback   []cleanRollbackResult `json:"rollback,omitempty"`
+}
+
+func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapshot) (cleanApplyResult, error) {
+	result := cleanApplyResult{Operations: []cleanOpResult{}}
+	snapshotByClip := make(map[string]cutSnapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		snapshotByClip[cleanClipKey(snapshot.VideoID, snapshot.ClipID)] = snapshot
+	}
+	touched := []string{}
+	seenTouched := map[string]bool{}
+
+	for _, plan := range plans {
+		for _, operation := range plan.Operations {
+			key := cleanClipKey(plan.VideoID, plan.ClipID)
+			if !seenTouched[key] {
+				touched = append(touched, key)
+				seenTouched[key] = true
+			}
+			status, err := applyCleanOperation(api, plan.VideoID, plan.ClipID, operation)
+			opResult := cleanOpResult{VideoID: plan.VideoID, ClipID: plan.ClipID, Op: operation.Op, Status: status}
+			if err == nil {
+				result.AppliedOps++
+				result.Operations = append(result.Operations, opResult)
+				continue
+			}
+			opResult.Error = err.Error()
+			result.FailedOps++
+			result.Operations = append(result.Operations, opResult)
+			result.Rollback = rollbackCleanClips(api, touched, snapshotByClip)
+			result.RolledBack = allRollbacksSucceeded(result.Rollback)
+			return result, fmt.Errorf("clean failed for video %s clip %s operation %s: %w", plan.VideoID, plan.ClipID, operation.Op, err)
+		}
+	}
+	return result, nil
+}
+
+func applyCleanOperation(api cleanAPI, videoID, clipID string, operation cleanOperation) (int, error) {
+	base := fmt.Sprintf("/v1/videos/%s/clips/%s", videoID, clipID)
+	switch operation.Op {
+	case "cut":
+		_, status, err := api.Post(base+"/cut", map[string]any{"cuts": operation.Cuts})
+		return status, err
+	case "cut-by-transcript":
+		_, status, err := api.Post(base+"/cut-by-transcript", map[string]any{"wordRanges": operation.WordRanges})
+		return status, err
+	case "remove-fillers":
+		_, status, err := api.Post(base+"/remove-fillers", map[string]any{})
+		return status, err
+	case "remove-silences":
+		_, status, err := api.Post(base+"/remove-silences", map[string]any{"mode": operation.Mode})
+		return status, err
+	default:
+		return 0, fmt.Errorf("unsupported cleanup operation %q", operation.Op)
+	}
+}
+
+func rollbackCleanClips(api cleanAPI, touched []string, snapshots map[string]cutSnapshot) []cleanRollbackResult {
+	results := make([]cleanRollbackResult, 0, len(touched))
+	for i := len(touched) - 1; i >= 0; i-- {
+		snapshot := snapshots[touched[i]]
+		status, err := restoreCutSnapshot(api, snapshot)
+		item := cleanRollbackResult{VideoID: snapshot.VideoID, ClipID: snapshot.ClipID, Status: status}
+		if err != nil {
+			item.Error = err.Error()
+		}
+		results = append(results, item)
+	}
+	return results
+}
+
+func allRollbacksSucceeded(results []cleanRollbackResult) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, result := range results {
+		if result.Error != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanClipKey(videoID, clipID string) string { return videoID + "\x00" + clipID }

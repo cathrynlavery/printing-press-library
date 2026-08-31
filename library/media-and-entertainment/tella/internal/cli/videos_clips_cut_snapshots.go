@@ -23,19 +23,30 @@ func captureCutSnapshot(api cleanAPI, videoID, clipID string) (cutSnapshot, erro
 	if err != nil {
 		return cutSnapshot{}, err
 	}
+	cuts, err := clipCutsFromResponse(data)
+	if err != nil {
+		return cutSnapshot{}, err
+	}
+	return cutSnapshot{VideoID: videoID, ClipID: clipID, CreatedAt: time.Now().UTC(), Cuts: cuts}, nil
+}
+
+func clipCutsFromResponse(data json.RawMessage) (any, error) {
 	var response map[string]any
 	if err := json.Unmarshal(data, &response); err != nil {
-		return cutSnapshot{}, fmt.Errorf("parsing clip response for cuts snapshot: %w", err)
+		return nil, fmt.Errorf("parsing clip response cuts: %w", err)
 	}
 	clip := response
 	if nested, ok := response["clip"].(map[string]any); ok {
 		clip = nested
 	}
 	cuts, ok := clip["cuts"]
-	if !ok || cuts == nil {
-		cuts = []any{}
+	if !ok {
+		return nil, fmt.Errorf("clip response is missing cuts")
 	}
-	return cutSnapshot{VideoID: videoID, ClipID: clipID, CreatedAt: time.Now().UTC(), Cuts: cuts}, nil
+	if _, ok := cuts.([]any); !ok {
+		return nil, fmt.Errorf("clip response cuts is not an array")
+	}
+	return cuts, nil
 }
 
 func saveCutSnapshot(api cleanAPI, videoID, clipID string) (string, error) {

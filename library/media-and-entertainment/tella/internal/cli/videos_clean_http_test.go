@@ -57,7 +57,7 @@ func TestCleanPlanAndApplyUsesOfficialBatchPayloads(t *testing.T) {
 		}
 		requests = append(requests, fixtureRequest{Method: request.Method, Path: request.URL.Path, Body: decodeFixtureBody(t, request)})
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"clip":{"id":"cl_one"}}`)
+		fmt.Fprint(w, `{"clip":{"id":"cl_one","cuts":[{"startTimeMs":50,"durationMs":25}]}}`)
 	}))
 	defer server.Close()
 
@@ -176,14 +176,15 @@ func TestVideosCleanDiscoversAndAppliesEveryClip(t *testing.T) {
 func TestCleanPartialFailureRollsBackAllTouchedClips(t *testing.T) {
 	patchBodies := map[string]map[string]any{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		switch request.Method {
-		case http.MethodPost:
-			if strings.Contains(request.URL.Path, "cl_two") {
-				http.Error(w, `{"error":"bad_request"}`, http.StatusBadRequest)
-				return
-			}
-			fmt.Fprint(w, `{"clip":{}}`)
-		case http.MethodPatch:
+		switch {
+		case request.Method == http.MethodPost && strings.Contains(request.URL.Path, "cl_two"):
+			http.Error(w, `{"error":"bad_request"}`, http.StatusBadRequest)
+			return
+		case request.Method == http.MethodPost:
+			fmt.Fprint(w, `{"clip":{"cuts":[{"startTimeMs":11,"durationMs":20}]}}`)
+		case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "cl_one"):
+			fmt.Fprint(w, `{"clip":{"cuts":[{"startTimeMs":11,"durationMs":20}]}}`)
+		case request.Method == http.MethodPatch:
 			patchBodies[request.URL.Path] = decodeFixtureBody(t, request)
 			fmt.Fprint(w, `{"clip":{}}`)
 		default:

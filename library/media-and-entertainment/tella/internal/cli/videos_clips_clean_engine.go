@@ -138,13 +138,6 @@ type cleanOpResult struct {
 	Error   string `json:"error,omitempty"`
 }
 
-type cleanRollbackResult struct {
-	VideoID string `json:"video_id"`
-	ClipID  string `json:"clip_id"`
-	Status  int    `json:"status,omitempty"`
-	Error   string `json:"error,omitempty"`
-}
-
 type cleanApplyResult struct {
 	AppliedOps int                   `json:"applied_ops"`
 	FailedOps  int                   `json:"failed_ops"`
@@ -161,17 +154,20 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 	}
 	touched := []string{}
 	seenTouched := map[string]bool{}
+	expectedCuts := map[string]cleanExpectedCuts{}
 
 	for _, plan := range plans {
 		for _, operation := range plan.Operations {
 			key := cleanClipKey(plan.VideoID, plan.ClipID)
-			status, err := applyCleanOperation(api, plan.VideoID, plan.ClipID, operation)
+			data, status, err := applyCleanOperation(api, plan.VideoID, plan.ClipID, operation)
 			opResult := cleanOpResult{VideoID: plan.VideoID, ClipID: plan.ClipID, Op: operation.Op, Status: status}
 			if err == nil {
 				if !seenTouched[key] {
 					touched = append(touched, key)
 					seenTouched[key] = true
 				}
+				cuts, cutsErr := clipCutsFromResponse(data)
+				expectedCuts[key] = cleanExpectedCuts{Cuts: cuts, Known: cutsErr == nil}
 				result.AppliedOps++
 				result.Operations = append(result.Operations, opResult)
 				continue
@@ -179,7 +175,12 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 			opResult.Error = err.Error()
 			result.FailedOps++
 			result.Operations = append(result.Operations, opResult)
-			result.Rollback = rollbackCleanClips(api, touched, snapshotByClip)
+			if mutationOutcomeIndeterminate(status) && !seenTouched[key] {
+				touched = append(touched, key)
+				seenTouched[key] = true
+				expectedCuts[key] = cleanExpectedCuts{}
+			}
+			result.Rollback = rollbackCleanClips(api, touched, snapshotByClip, expectedCuts)
 			result.RolledBack = allRollbacksSucceeded(result.Rollback)
 			return result, fmt.Errorf("clean failed for video %s clip %s operation %s: %w", plan.VideoID, plan.ClipID, operation.Op, err)
 		}
@@ -187,50 +188,20 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 	return result, nil
 }
 
-func applyCleanOperation(api cleanAPI, videoID, clipID string, operation cleanOperation) (int, error) {
+func applyCleanOperation(api cleanAPI, videoID, clipID string, operation cleanOperation) (json.RawMessage, int, error) {
 	base := fmt.Sprintf("/v1/videos/%s/clips/%s", videoID, clipID)
 	switch operation.Op {
 	case "cut":
-		_, status, err := api.Post(base+"/cut", map[string]any{"cuts": operation.Cuts})
-		return status, err
+		return api.Post(base+"/cut", map[string]any{"cuts": operation.Cuts})
 	case "cut-by-transcript":
-		_, status, err := api.Post(base+"/cut-by-transcript", map[string]any{"wordRanges": operation.WordRanges})
-		return status, err
+		return api.Post(base+"/cut-by-transcript", map[string]any{"wordRanges": operation.WordRanges})
 	case "remove-fillers":
-		_, status, err := api.Post(base+"/remove-fillers", map[string]any{})
-		return status, err
+		return api.Post(base+"/remove-fillers", map[string]any{})
 	case "remove-silences":
-		_, status, err := api.Post(base+"/remove-silences", map[string]any{"mode": operation.Mode})
-		return status, err
+		return api.Post(base+"/remove-silences", map[string]any{"mode": operation.Mode})
 	default:
-		return 0, fmt.Errorf("unsupported cleanup operation %q", operation.Op)
+		return nil, 0, fmt.Errorf("unsupported cleanup operation %q", operation.Op)
 	}
-}
-
-func rollbackCleanClips(api cleanAPI, touched []string, snapshots map[string]cutSnapshot) []cleanRollbackResult {
-	results := make([]cleanRollbackResult, 0, len(touched))
-	for i := len(touched) - 1; i >= 0; i-- {
-		snapshot := snapshots[touched[i]]
-		status, err := restoreCutSnapshot(api, snapshot)
-		item := cleanRollbackResult{VideoID: snapshot.VideoID, ClipID: snapshot.ClipID, Status: status}
-		if err != nil {
-			item.Error = err.Error()
-		}
-		results = append(results, item)
-	}
-	return results
-}
-
-func allRollbacksSucceeded(results []cleanRollbackResult) bool {
-	if len(results) == 0 {
-		return false
-	}
-	for _, result := range results {
-		if result.Error != "" {
-			return false
-		}
-	}
-	return true
 }
 
 func cleanClipKey(videoID, clipID string) string { return videoID + "\x00" + clipID }

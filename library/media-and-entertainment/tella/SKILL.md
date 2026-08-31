@@ -252,7 +252,7 @@ tella-pp-cli videos update vid_abc --studio-voice true --apply
 tella-pp-cli videos clips update vid_abc cl_xyz --studio-voice false --apply
 ```
 
-The CLI uses Tella's Studio Voice name and translates it to the public API's `studioSound` field. Video-wide enablement generates enhanced audio asynchronously and raw audio remains the fallback until it is ready. A clip-level `false` opts that clip out; `true` re-enables it under the video master switch.
+The CLI uses Tella's Studio Voice name and translates it to the public API's `studioSound` field. Video-wide enablement generates enhanced audio asynchronously and raw audio remains the fallback until it is ready. A clip-level `false` opts that clip out; `true` re-enables it under the video master switch. With `--stdin`, typed audio and Studio Voice flags override the same fields from the JSON body.
 
 Whole-clip UI mute is not exposed in the current public schema/MCP reference, so do not invent a `muted` field. `videos apply-edits` is similarly limited to adding sound effects, text/media overlays, zooms, blurs, and highlights; it cannot create cuts.
 

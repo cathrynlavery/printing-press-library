@@ -49,7 +49,7 @@ func newVideosClipsUpdateCmd(flags *rootFlags) *cobra.Command {
 			path = replacePathParam(path, "clipId", args[1])
 			var body map[string]any
 			if stdinBody {
-				stdinData, err := io.ReadAll(os.Stdin)
+				stdinData, err := io.ReadAll(cmd.InOrStdin())
 				if err != nil {
 					return fmt.Errorf("reading stdin: %w", err)
 				}
@@ -80,27 +80,27 @@ func newVideosClipsUpdateCmd(flags *rootFlags) *cobra.Command {
 				if bodyOrder != 0 {
 					body["order"] = bodyOrder
 				}
-				if microphoneVolume != "" {
-					volume, parseErr := parseClipVolume(microphoneVolume, "--microphone-volume")
-					if parseErr != nil {
-						return usageErr(parseErr)
-					}
-					body["microphoneVolume"] = volume
+			}
+			if microphoneVolume != "" {
+				volume, parseErr := parseClipVolume(microphoneVolume, "--microphone-volume")
+				if parseErr != nil {
+					return usageErr(parseErr)
 				}
-				if systemAudioVolume != "" {
-					volume, parseErr := parseClipVolume(systemAudioVolume, "--system-audio-volume")
-					if parseErr != nil {
-						return usageErr(parseErr)
-					}
-					body["systemAudioVolume"] = volume
+				body["microphoneVolume"] = volume
+			}
+			if systemAudioVolume != "" {
+				volume, parseErr := parseClipVolume(systemAudioVolume, "--system-audio-volume")
+				if parseErr != nil {
+					return usageErr(parseErr)
 				}
-				if studioVoice != "" {
-					enabled, parseErr := parseStrictBool(studioVoice, "--studio-voice")
-					if parseErr != nil {
-						return usageErr(parseErr)
-					}
-					body["studioSound"] = enabled
+				body["systemAudioVolume"] = volume
+			}
+			if studioVoice != "" {
+				enabled, parseErr := parseStrictBool(studioVoice, "--studio-voice")
+				if parseErr != nil {
+					return usageErr(parseErr)
 				}
+				body["studioSound"] = enabled
 			}
 			audioEdit := microphoneVolume != "" || systemAudioVolume != "" || studioVoice != ""
 			if audioEdit && (flags.dryRun || !applyAudio) {

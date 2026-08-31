@@ -24,6 +24,7 @@
     "internal/cli/videos_clips_restore.go",
     "internal/cli/videos_clips_update.go",
     "internal/cli/videos_clips_update-transcript-words.go",
+    "internal/cli/videos_audio_update_test.go",
     "internal/cli/videos_clean_http_test.go",
     "internal/cli/videos_clean_rollback_test.go",
     "internal/cli/videos_official_editing_test.go",

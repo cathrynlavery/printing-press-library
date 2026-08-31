@@ -352,7 +352,7 @@ tella-pp-cli playlists edit-pass plst_42 --remove-fillers --remove-buffers --tri
 
 Commands default to dry-run/plan mode when they perform compound edits; pass each command's `--apply` flag where available, or drop global `--dry-run`, only after reviewing the emitted plan.
 
-The CLI uses Tella's user-facing Studio Voice name, while translating it to the public API's `studioSound` field. Enabling it on a video starts enhanced-audio generation asynchronously; playback and exports use the raw audio until that version is ready. The clip setting opts an individual clip out (`false`) or re-enables it (`true`) under the video's master switch.
+The CLI uses Tella's user-facing Studio Voice name, while translating it to the public API's `studioSound` field. Enabling it on a video starts enhanced-audio generation asynchronously; playback and exports use the raw audio until that version is ready. The clip setting opts an individual clip out (`false`) or re-enables it (`true`) under the video's master switch. When `--stdin` is combined with typed audio or Studio Voice flags, the typed flags are validated and override the corresponding JSON fields.
 
 Tella's editor added whole-clip mute in August 2026, but the current public `update_clip` schema and MCP reference do not expose that toggle. The CLI therefore does not guess a mute field. Use the documented microphone/system volume overrides above when those tracks exist; setting both to `0` is not presented as equivalent to Tella's undoable UI mute.
 

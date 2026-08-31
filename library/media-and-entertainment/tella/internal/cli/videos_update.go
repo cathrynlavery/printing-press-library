@@ -54,7 +54,7 @@ func newVideosUpdateCmd(flags *rootFlags) *cobra.Command {
 			path = replacePathParam(path, "id", args[0])
 			var body map[string]any
 			if stdinBody {
-				stdinData, err := io.ReadAll(os.Stdin)
+				stdinData, err := io.ReadAll(cmd.InOrStdin())
 				if err != nil {
 					return fmt.Errorf("reading stdin: %w", err)
 				}
@@ -117,13 +117,13 @@ func newVideosUpdateCmd(flags *rootFlags) *cobra.Command {
 				if bodyViewCountEnabled != false {
 					body["viewCountEnabled"] = bodyViewCountEnabled
 				}
-				if studioVoice != "" {
-					enabled, parseErr := parseStrictBool(studioVoice, "--studio-voice")
-					if parseErr != nil {
-						return usageErr(parseErr)
-					}
-					body["studioSound"] = enabled
+			}
+			if studioVoice != "" {
+				enabled, parseErr := parseStrictBool(studioVoice, "--studio-voice")
+				if parseErr != nil {
+					return usageErr(parseErr)
 				}
+				body["studioSound"] = enabled
 			}
 			if studioVoice != "" && (flags.dryRun || !applyStudioVoice) {
 				return printJSONFiltered(cmd.OutOrStdout(), map[string]any{

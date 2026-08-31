@@ -165,13 +165,13 @@ func applyCleanPlans(api cleanAPI, plans []cleanClipPlan, snapshots []cutSnapsho
 	for _, plan := range plans {
 		for _, operation := range plan.Operations {
 			key := cleanClipKey(plan.VideoID, plan.ClipID)
-			if !seenTouched[key] {
-				touched = append(touched, key)
-				seenTouched[key] = true
-			}
 			status, err := applyCleanOperation(api, plan.VideoID, plan.ClipID, operation)
 			opResult := cleanOpResult{VideoID: plan.VideoID, ClipID: plan.ClipID, Op: operation.Op, Status: status}
 			if err == nil {
+				if !seenTouched[key] {
+					touched = append(touched, key)
+					seenTouched[key] = true
+				}
 				result.AppliedOps++
 				result.Operations = append(result.Operations, opResult)
 				continue

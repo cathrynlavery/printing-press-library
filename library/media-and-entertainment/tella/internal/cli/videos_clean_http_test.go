@@ -203,14 +203,42 @@ func TestCleanPartialFailureRollsBackAllTouchedClips(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected partial failure")
 	}
-	if result.AppliedOps != 1 || result.FailedOps != 1 || !result.RolledBack || len(result.Rollback) != 2 {
+	if result.AppliedOps != 1 || result.FailedOps != 1 || !result.RolledBack || len(result.Rollback) != 1 {
 		t.Fatalf("partial result = %#v", result)
 	}
-	for _, snapshot := range snapshots {
+	for _, snapshot := range snapshots[:1] {
 		path := fmt.Sprintf("/v1/videos/%s/clips/%s", snapshot.VideoID, snapshot.ClipID)
 		body, ok := patchBodies[path]
 		if !ok || !reflect.DeepEqual(body["cuts"], snapshot.Cuts) {
 			t.Fatalf("rollback %s body = %#v, want cuts %#v", path, body, snapshot.Cuts)
 		}
+	}
+	if _, ok := patchBodies["/v1/videos/vid_one/clips/cl_two"]; ok {
+		t.Fatalf("failed first operation must not roll back unmodified clip: %#v", patchBodies)
+	}
+}
+
+func TestCleanFirstFailureDoesNotRollbackUnmodifiedClip(t *testing.T) {
+	patches := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.Method {
+		case http.MethodPost:
+			http.Error(w, `{"error":"bad_request"}`, http.StatusBadRequest)
+		case http.MethodPatch:
+			patches++
+			fmt.Fprint(w, `{"clip":{}}`)
+		default:
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	plan := cleanClipPlan{VideoID: "vid_one", ClipID: "cl_one", Operations: []cleanOperation{{Op: "remove-fillers"}}}
+	snapshot := cutSnapshot{VideoID: "vid_one", ClipID: "cl_one", Cuts: []any{map[string]any{"startTimeMs": float64(10), "durationMs": float64(20)}}}
+	result, err := applyCleanPlans(fixtureClient(server), []cleanClipPlan{plan}, []cutSnapshot{snapshot})
+	if err == nil {
+		t.Fatal("expected first operation to fail")
+	}
+	if patches != 0 || len(result.Rollback) != 0 || result.RolledBack {
+		t.Fatalf("first failure patches=%d result=%#v", patches, result)
 	}
 }

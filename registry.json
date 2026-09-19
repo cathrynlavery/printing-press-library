@@ -1544,9 +1544,9 @@
       "path": "library/other/anac-pl",
       "release": {
         "cli_name": "anac-pl-pp-cli",
-        "version": "2026.9.5",
-        "released_at": "2026-09-17T09:10:25Z",
-        "source_commit": "916e5f8ed29a3af74a7c4378cd2e380536b01d53"
+        "version": "2026.9.6",
+        "released_at": "2026-09-19T09:16:02Z",
+        "source_commit": "179d1d5125d9d77b0f419ca315fb31a62457bf4d"
       },
       "printer": "aborruso",
       "printer_name": "aborruso",
@@ -2094,9 +2094,9 @@
       "path": "library/other/ars-sicilia",
       "release": {
         "cli_name": "ars-sicilia-pp-cli",
-        "version": "2026.9.6",
-        "released_at": "2026-09-14T10:28:55Z",
-        "source_commit": "634d6c57c3cfed78e810be7ac58a9702f6314f16"
+        "version": "2026.9.7",
+        "released_at": "2026-09-19T09:16:02Z",
+        "source_commit": "96f12fde5451d1d14a3d6cd378c775b81e7afb4d"
       },
       "printer": "aborruso",
       "printer_name": "aborruso",
@@ -9792,6 +9792,12 @@
         "Refuses to store a token whose account is not the address you named, so a shared browser cannot sign the wrong household member in."
       ],
       "path": "library/health/garmin",
+      "release": {
+        "cli_name": "garmin-pp-cli",
+        "version": "2026.9.1",
+        "released_at": "2026-09-19T09:16:02Z",
+        "source_commit": "faed13504c83e44479dc8c73d885fa8e5d6d1c4c"
+      },
       "printer": "prashantkamani",
       "printer_name": "Prashant Kamani",
       "creator": {
@@ -11814,6 +11820,12 @@
         "Rank saved shops by straight-line distance from supplied coordinates."
       ],
       "path": "library/food-and-dining/haven-hot-chicken",
+      "release": {
+        "cli_name": "haven-hot-chicken-pp-cli",
+        "version": "2026.9.1",
+        "released_at": "2026-09-19T09:16:02Z",
+        "source_commit": "53895d634fb53ca90ad345684fc34a4d60441386"
+      },
       "printer": "wirelesstkd",
       "printer_name": "matthew.martin",
       "creator": {

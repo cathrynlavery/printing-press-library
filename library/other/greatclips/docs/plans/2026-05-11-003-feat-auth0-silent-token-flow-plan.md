@@ -761,7 +761,7 @@ The killer flow is reachable, end-to-end, no SPA involvement:
 greatclips-pp-cli auth login --chrome     # one time, ~30 days
 greatclips-pp-cli wait --store-number 8991
 greatclips-pp-cli checkin --first-name Matt --last-name "Van Horn" \
-  --phone-number "(520) 907-6052" --salon-number 8991 --guests 4
+  --phone-number "(555) 555-0123" --salon-number 8991 --guests 4
 greatclips-pp-cli status
 greatclips-pp-cli cancel                  # optional
 ```

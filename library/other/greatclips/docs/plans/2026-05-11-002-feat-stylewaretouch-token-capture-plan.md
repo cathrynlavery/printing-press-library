@@ -183,7 +183,7 @@ user is on the actual waitlist at Island Square.
    mutation. Show the exact command and request body, ask "Submit
    for real?" with a clear yes/no.
 4. **Submit:** `greatclips-pp-cli checkin --first-name Matt
-   --last-name "Van Horn" --phone-number "(520) 907-6052"
+   --last-name "Van Horn" --phone-number "(555) 555-0123"
    --salon-number 8991 --guests 4 --json`
 5. **Verify:** `greatclips-pp-cli status --json` should return Matt's
    active check-in at salon 8991 with `positionInLine` and

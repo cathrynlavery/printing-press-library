@@ -397,7 +397,7 @@ real, current JWT.
    empty body — verify the exact shape and surface honestly)
 5. **`checkin` test:** With explicit user re-confirmation (real mutation!),
    `greatclips-pp-cli checkin --first-name Matt --last-name "Van Horn"
-   --phone-number "(520) 907-6052" --salon-number 8991 --guests 4` should
+   --phone-number "(555) 555-0123" --salon-number 8991 --guests 4` should
    succeed with a documented success payload, AND a subsequent
    `greatclips-pp-cli status` should show the active check-in
 6. **`cancel` test:** Immediately after #5, `greatclips-pp-cli cancel`
@@ -565,6 +565,6 @@ kids to the list") is reachable in one command sequence:
 ```
 greatclips-pp-cli wait --store-number 8991
 greatclips-pp-cli checkin --first-name Matt --last-name "Van Horn" \
-  --phone-number "(520) 907-6052" --salon-number 8991 --guests 4
+  --phone-number "(555) 555-0123" --salon-number 8991 --guests 4
 greatclips-pp-cli status
 ```

@@ -41,7 +41,7 @@
       "command": "checkin",
       "description": "Add yourself plus up to 4 additional party members to a salon waitlist with one command.",
       "rationale": "The SPA submit flow requires HMAC signing plus a customer-audience HS512 JWT plus a non-obvious request body shape; this CLI ships the full pipeline.",
-      "example": "greatclips-pp-cli checkin --first-name Matt --last-name VanHorn --phone-number 5209076052 --salon-number 8991 --guests 4",
+      "example": "greatclips-pp-cli checkin --first-name Matt --last-name VanHorn --phone-number 5555550123 --salon-number 8991 --guests 4",
       "why_it_matters": "Turns the click-through into one keystroke, agent-actionable.",
       "group": "Agent-native plumbing"
     },

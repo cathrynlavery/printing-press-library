@@ -36,7 +36,7 @@ file, made safe by a verified cancel + spend cap.
    + report free-window/fee. The safety valve that makes hands-off checkout tolerable.
 3. **Comparison shop:** `goat best "help moving" --on sat --min-rating 4.9` / `goat compare` -> honest
    all-in ranked Taskers the app hides.
-4. **Remote errand (F3):** `goat call 5209076052 "when does the jewelry store open"` -> Magic request
+4. **Remote errand (F3):** `goat call 5555550123 "when does the jewelry store open"` -> Magic request
    -> `goat track <id>` until terminal -> answer read from conversation.
 5. **Cross-source dispatch:** `goat dispatch "<task>"` routes to Magic (remote-doable) or TaskRabbit
    (in-person) by task shape, with `--via` override.

@@ -211,7 +211,7 @@
       },
       {
         "title": "Dispatch a remote errand",
-        "command": "human-goat-pp-cli call 5209076052 \"when does the jewelry store open\"",
+        "command": "human-goat-pp-cli call 5555550123 \"when does the jewelry store open\"",
         "explanation": "Sends a phone-call task to Magic and returns a request id to track; the answer comes back in the conversation."
       },
       {

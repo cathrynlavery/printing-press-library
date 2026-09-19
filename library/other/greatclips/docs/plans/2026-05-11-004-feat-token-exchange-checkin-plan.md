@@ -120,7 +120,7 @@ Then live-test sequence:
 1. `greatclips-pp-cli status` → 200, no active check-in
 2. **User confirmation gate**
 3. `greatclips-pp-cli checkin --first-name Matt --last-name "Van Horn"
-   --phone-number "(520) 907-6052" --salon-number 8991 --guests 4`
+   --phone-number "(555) 555-0123" --salon-number 8991 --guests 4`
    → real 200, Matt on the waitlist
 4. `greatclips-pp-cli status` → confirms the new check-in
 5. Ask user: leave it active or cancel?

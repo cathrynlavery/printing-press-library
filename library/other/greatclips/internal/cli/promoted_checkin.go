@@ -14,8 +14,8 @@ import (
 )
 
 // stripNonDigits returns input with all non-digit ASCII chars removed.
-// Used to normalize phone-number formatting like "(520) 907-6052" to
-// "5209076052" before sending to stylewaretouch (server rejects
+// Used to normalize phone-number formatting like "(555) 555-0123" to
+// "5555550123" before sending to stylewaretouch (server rejects
 // formatted phones).
 func stripNonDigits(s string) string {
 	var b strings.Builder

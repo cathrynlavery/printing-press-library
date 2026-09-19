@@ -173,7 +173,7 @@ Cancels, re-reads status, and reports cancelled plus whether it was inside the f
 ### Dispatch a remote errand
 
 ```bash
-human-goat-pp-cli call 5209076052 "when does the jewelry store open"
+human-goat-pp-cli call 5555550123 "when does the jewelry store open"
 ```
 
 Sends a phone-call task to Magic and returns a request id to track; the answer comes back in the conversation.

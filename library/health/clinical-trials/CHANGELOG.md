@@ -2,6 +2,10 @@
 
 This file is maintained by printing-press-library release automation. Do not hand-edit release sections in normal PRs.
 
+## 2026.9.14 - 2026-09-20
+
+- test(clinical-trials): guard the ctgov network failure paths (#2022).
+
 ## 2026.9.13 - 2026-09-19
 
 - test(clinical-trials): guard counter.top limit and tie-break rules (#2017).

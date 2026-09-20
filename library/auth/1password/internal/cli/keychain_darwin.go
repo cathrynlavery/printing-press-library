@@ -235,6 +235,9 @@ func getKeychainSecret(ctx context.Context, service, account string) (string, er
 	var secret unsafe.Pointer
 	var secretLen C.UInt32
 	status := C.pp_get_keychain_secret(cService, C.UInt32(len(service)), cAccount, C.UInt32(len(account)), &secret, &secretLen)
+	if status == C.errSecItemNotFound {
+		return "", errServiceAccountSecretNotFound
+	}
 	if status != C.errSecSuccess {
 		return "", fmt.Errorf("Keychain lookup failed (OSStatus %d)", int32(status))
 	}

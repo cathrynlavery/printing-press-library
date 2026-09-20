@@ -506,6 +506,10 @@ func newNovelDocumentsReadCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return usageErr(err)
 			}
+			path := strings.TrimPrefix(args[0], "op://")
+			if strings.Contains(args[0], "?") || strings.Contains(path, "//") || ref.Vault == "" || ref.Item == "" || ref.Field == "" || strings.Count(path, "/") > 3 {
+				return usageErr(fmt.Errorf("document reference must be op://vault/item/[section/]file without query parameters"))
+			}
 			plan := map[string]any{"ref": ref, "kind": "document_or_attachment", "policy": policyDecision(ref), "would_reveal": reveal}
 			if flags.dryRun || !reveal || cliutil.IsVerifyEnv() {
 				plan["value"] = "redacted"
@@ -515,7 +519,19 @@ func newNovelDocumentsReadCmd(flags *rootFlags) *cobra.Command {
 			if deny, reason := denyRef(ref); deny {
 				return fmt.Errorf("policy denied document reveal: %s", reason)
 			}
-			out, _, err := newOpRunner().command(cmd.Context(), "read", args[0])
+			runner := newOpRunner()
+			// The official type attribute resolves this exact field without
+			// retrieving its value or any other fields from the item.
+			kind, _, err := runner.command(cmd.Context(), "read", args[0]+"?attribute=type")
+			if err != nil {
+				return fmt.Errorf("cannot verify document or attachment type: %w", err)
+			}
+			if !strings.EqualFold(strings.TrimSpace(string(kind)), "file") {
+				return fmt.Errorf("reference does not resolve to a document or attachment")
+			}
+			// Request the file-only content attribute rather than the generic
+			// field value, so a changed reference cannot reveal a secret field.
+			out, _, err := runner.command(cmd.Context(), "read", args[0]+"?attribute=content")
 			if err != nil {
 				return err
 			}
@@ -1109,7 +1125,7 @@ func attachOpAgentExamples(root *cobra.Command) {
 		"cards resolve":       "  1password-pp-cli cards resolve --query \"card\" --json",
 		"documents audit":     "  1password-pp-cli documents audit --json",
 		"documents inventory": "  1password-pp-cli documents inventory --json",
-		"documents read":      "  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal",
+		"documents read":      "  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal --agent",
 		"env inject":          "  1password-pp-cli env inject --in-file README.md --out-file injected.env --json",
 		"env plan":            "  1password-pp-cli env plan API_TOKEN= --json",
 		"items classify":      "  1password-pp-cli items classify --json",

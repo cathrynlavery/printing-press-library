@@ -214,7 +214,7 @@ These capabilities aren't available in any other tool for this API.
 - **`documents read`** — Stream one exact document or attachment reference only after policy checks and an explicit `--reveal` gate. The value is never written by the CLI unless the caller deliberately redirects stdout.
 
   ```bash
-  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal
+  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal --agent
   ```
 
 ### Sharing

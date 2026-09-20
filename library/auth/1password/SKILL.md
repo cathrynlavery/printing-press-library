@@ -129,7 +129,7 @@ These capabilities aren't available in any other tool for this API.
 - **`documents read`** — Stream one exact document or attachment reference only after policy checks and an explicit `--reveal` gate. Use this for in-memory consumers; never place document bytes in a client profile.
 
   ```bash
-  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal
+  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal --agent
   ```
 
 ### Sharing
@@ -318,7 +318,7 @@ A profile is a saved set of flag values, reused across invocations. Use it when 
 
 Explicit flags always win over profile values; profile values win over defaults. `agent-context` lists all available profiles under `available_profiles` so introspecting agents discover them at runtime.
 
-Profiles never store or apply `--op-service-account`, `--op-service-account-token-env`, or `--op-account`; use the dedicated service-account selector on each invocation.
+Profiles never store or apply `--op-service-account`, `--op-service-account-token-env`, or `--op-account`; use the dedicated service-account selector on each invocation. Legacy authentication values are removed in memory when profiles are read; the next explicit profile write also removes them from disk.
 
 ## Exit Codes
 

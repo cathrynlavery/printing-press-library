@@ -15,12 +15,13 @@ import (
 )
 
 type fakeSecretStore struct {
-	values    map[string]string
-	deleted   []string
-	getErr    error
-	getCalls  int
-	setCalls  int
-	failSetAt int
+	values        map[string]string
+	deleted       []string
+	getErr        error
+	getCalls      int
+	setCalls      int
+	failSetAt     int
+	afterMutation func()
 }
 
 func (f *fakeSecretStore) Set(_ context.Context, name, value string) error {
@@ -32,6 +33,7 @@ func (f *fakeSecretStore) Set(_ context.Context, name, value string) error {
 		f.values = map[string]string{}
 	}
 	f.values[name] = value
+	f.didMutate()
 	return nil
 }
 func (f *fakeSecretStore) Get(_ context.Context, name string) (string, error) {
@@ -41,7 +43,7 @@ func (f *fakeSecretStore) Get(_ context.Context, name string) (string, error) {
 	}
 	v, ok := f.values[name]
 	if !ok {
-		return "", errors.New("secret missing")
+		return "", errServiceAccountSecretNotFound
 	}
 	return v, nil
 }
@@ -51,12 +53,22 @@ func (f *fakeSecretStore) Delete(_ context.Context, name string) error {
 	}
 	delete(f.values, name)
 	f.deleted = append(f.deleted, name)
+	f.didMutate()
 	return nil
+}
+
+func (f *fakeSecretStore) didMutate() {
+	if f.afterMutation != nil {
+		hook := f.afterMutation
+		f.afterMutation = nil
+		hook()
+	}
 }
 
 func withFakeServiceAccountStore(t *testing.T) *fakeSecretStore {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "")
 	fake := &fakeSecretStore{values: map[string]string{}}
 	previous := serviceAccountSecrets
 	serviceAccountSecrets = fake
@@ -218,7 +230,7 @@ func TestProfilesNeverCaptureOrApplyAuthSelectors(t *testing.T) {
 	t.Setenv("SECRET_ENV", "profile-unit-secret")
 	flags := &rootFlags{}
 	cmd := newRootCmd(flags)
-	cmd.SetArgs([]string{"profile", "save", "safe", "--json", "--op-service-account-token-env", "SECRET_ENV", "--op-account", "example"})
+	cmd.SetArgs([]string{"profile", "save", "safe", "--json", "--op-service-account-token-env", "SECRET_ENV"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -231,6 +243,11 @@ func TestProfilesNeverCaptureOrApplyAuthSelectors(t *testing.T) {
 	}
 	if _, ok := p.Values["op-account"]; ok {
 		t.Fatal("profile stored op account selector")
+	}
+	accountCmd := newRootCmd(&rootFlags{})
+	accountCmd.SetArgs([]string{"profile", "save", "desktop", "--json", "--op-account", "example"})
+	if err := accountCmd.Execute(); err != nil {
+		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".1password-pp-cli", "profiles.json"))
 	if err != nil {
@@ -284,6 +301,7 @@ func TestServiceAccountDryRunNeverAccessesKeychain(t *testing.T) {
 		{"service-accounts", "add", "team", "--account", "example-team.1password.com", "--dry-run", "--agent"},
 		{"service-accounts", "remove", "team", "--dry-run", "--agent"},
 		{"service-accounts", "repair-access", "team", "--dry-run", "--agent"},
+		{"service-accounts", "doctor", "team", "--dry-run", "--agent"},
 	} {
 		t.Run(args[1], func(t *testing.T) {
 			fake := withFakeServiceAccountStore(t)
@@ -330,8 +348,13 @@ func TestServiceAccountMetadataFailurePreservesExistingToken(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Mkdir(metadataPath+".tmp", 0o700); err != nil {
-				t.Fatal(err)
+			fake.afterMutation = func() {
+				if err := os.Remove(metadataPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(metadataPath, 0o700); err != nil {
+					t.Fatal(err)
+				}
 			}
 			cmd := newRootCmd(&rootFlags{})
 			cmd.SetIn(strings.NewReader("replacement-unit-secret"))
@@ -342,7 +365,7 @@ func TestServiceAccountMetadataFailurePreservesExistingToken(t *testing.T) {
 				args = append(args, "--yes")
 			}
 			cmd.SetArgs(args)
-			if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "writing service-account metadata") {
+			if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "persisting service-account metadata") {
 				t.Fatalf("expected metadata failure, got %v", err)
 			}
 			if fake.values["team"] != "existing-unit-secret" {
@@ -361,8 +384,13 @@ func TestServiceAccountRollbackFailureIsReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(metadataPath+".tmp", 0o700); err != nil {
-		t.Fatal(err)
+	fake.afterMutation = func() {
+		if err := os.Remove(metadataPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(metadataPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	cmd := newRootCmd(&rootFlags{})
 	cmd.SetIn(strings.NewReader("replacement-unit-secret"))
@@ -370,5 +398,108 @@ func TestServiceAccountRollbackFailureIsReported(t *testing.T) {
 	err = cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "restoring previous Keychain state also failed") {
 		t.Fatalf("rollback failure was hidden: %v", err)
+	}
+}
+
+func TestExplicitOpAccountRejectsServiceAccountAuthentication(t *testing.T) {
+	fake := withFakeServiceAccountStore(t)
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "")
+	for _, flags := range []rootFlags{
+		{opAccount: "desktop", opServiceAccount: "team"},
+		{opAccount: "desktop", opServiceAccountTokenEnv: "TEAM_OP_TOKEN"},
+	} {
+		if _, err := resolveOpAuth(context.Background(), &flags); err == nil || !strings.Contains(err.Error(), "--op-account") {
+			t.Fatalf("conflicting selector must fail before authentication: %v", err)
+		}
+	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "ambient-unit-secret")
+	if _, err := resolveOpAuth(context.Background(), &rootFlags{opAccount: "desktop"}); err == nil || !strings.Contains(err.Error(), "OP_SERVICE_ACCOUNT_TOKEN") {
+		t.Fatalf("ambient token must not silently override explicit account: %v", err)
+	}
+	if fake.getCalls != 0 {
+		t.Fatal("conflicting selectors read Keychain")
+	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "")
+	auth, err := resolveOpAuth(context.Background(), &rootFlags{opAccount: "desktop"})
+	if err != nil || auth.opAccount != "desktop" || auth.mode != "desktop-or-session" {
+		t.Fatalf("desktop account alone failed: %v", err)
+	}
+}
+
+func TestServiceAccountSaveUsesPrivateUniqueTemporaryFile(t *testing.T) {
+	withFakeServiceAccountStore(t)
+	p, err := serviceAccountStorePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A stale former shared temporary path cannot disrupt a new writer.
+	if err := os.Mkdir(p+".tmp", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	saveTestServiceAccount(t, "team", "example.com")
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("metadata mode: %v", info.Mode())
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(p), ".service-accounts-*.tmp"))
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("temporary files remained: %v, %v", matches, err)
+	}
+}
+
+func TestServiceAccountAddPreservesOrphanedToken(t *testing.T) {
+	for _, failMetadata := range []bool{false, true} {
+		t.Run(map[bool]string{false: "replacement", true: "rollback"}[failMetadata], func(t *testing.T) {
+			fake := withFakeServiceAccountStore(t)
+			fake.values["orphan"] = "orphaned-unit-secret"
+			if failMetadata {
+				p, err := serviceAccountStorePath()
+				if err != nil {
+					t.Fatal(err)
+				}
+				fake.afterMutation = func() {
+					if err := os.Mkdir(p, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			cmd := newServiceAccountAddCmd(&rootFlags{noInput: true})
+			cmd.SetIn(strings.NewReader("replacement-unit-secret"))
+			cmd.SetArgs([]string{"orphan", "--account", "example.com", "--token-stdin"})
+			err := cmd.Execute()
+			if fake.getCalls != 1 {
+				t.Fatal("orphaned Keychain token was not read before replacement")
+			}
+			if failMetadata {
+				if err == nil || fake.values["orphan"] != "orphaned-unit-secret" || len(fake.deleted) != 0 {
+					t.Fatalf("failed metadata write destroyed orphaned credential: %v", err)
+				}
+			} else {
+				if err != nil || fake.values["orphan"] != "replacement-unit-secret" {
+					t.Fatalf("orphan replacement failed: %v", err)
+				}
+				if _, _, err := getServiceAccountMetadata("orphan"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceAccountAddRejectsUnknownKeychainStateWithoutMetadata(t *testing.T) {
+	fake := withFakeServiceAccountStore(t)
+	fake.getErr = errors.New("Keychain access denied")
+	fake.values["orphan"] = "orphaned-unit-secret"
+	cmd := newServiceAccountAddCmd(&rootFlags{noInput: true})
+	cmd.SetIn(strings.NewReader("replacement-unit-secret"))
+	cmd.SetArgs([]string{"orphan", "--account", "example.com", "--token-stdin"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "replacement aborted") {
+		t.Fatalf("unknown secure-storage state must fail closed: %v", err)
+	}
+	if fake.setCalls != 0 || len(fake.deleted) != 0 || fake.values["orphan"] != "orphaned-unit-secret" {
+		t.Fatal("unreadable orphaned token was changed")
 	}
 }

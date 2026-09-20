@@ -68,24 +68,21 @@ func loadProfileStore() (*profileStore, error) {
 	if s.Profiles == nil {
 		s.Profiles = map[string]Profile{}
 	}
-	// Treat the profiles file as untrusted input. Older or hand-edited files
-	// must not make auth selectors visible through profile show/use/list.
-	sanitized := false
+	// Reads must remain usable when the store is read-only. Sanitize in memory;
+	// the next explicit profile write also removes legacy values from disk.
+	sanitizeProfileStore(&s)
+	return &s, nil
+}
+
+func sanitizeProfileStore(s *profileStore) {
 	for name, profile := range s.Profiles {
 		for flagName := range profile.Values {
 			if isSecretBearingProfileFlag(flagName) {
 				delete(profile.Values, flagName)
-				sanitized = true
 			}
 		}
 		s.Profiles[name] = profile
 	}
-	if sanitized {
-		if err := saveProfileStore(&s); err != nil {
-			return nil, fmt.Errorf("removing secret-bearing values from profiles: %w", err)
-		}
-	}
-	return &s, nil
 }
 
 func saveProfileStore(s *profileStore) error {
@@ -93,6 +90,7 @@ func saveProfileStore(s *profileStore) error {
 	if err != nil {
 		return err
 	}
+	sanitizeProfileStore(s)
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling profiles: %w", err)

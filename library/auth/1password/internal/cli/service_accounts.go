@@ -21,6 +21,8 @@ import (
 
 const serviceAccountKeychainService = "1password-pp-cli/service-account"
 
+var errServiceAccountSecretNotFound = errors.New("service-account token not found in secure storage")
+
 type serviceAccountMetadata struct {
 	Name         string     `json:"name"`
 	Account      string     `json:"account"`
@@ -52,6 +54,9 @@ type opAuthContext struct {
 }
 
 func resolveOpAuth(ctx context.Context, flags *rootFlags) (opAuthContext, error) {
+	if flags.opAccount != "" && (flags.opServiceAccount != "" || flags.opServiceAccountTokenEnv != "" || os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") != "") {
+		return opAuthContext{}, errors.New("--op-account selects desktop/session authentication and cannot be combined with a service-account selector or OP_SERVICE_ACCOUNT_TOKEN; unset the token or remove --op-account")
+	}
 	if flags.opServiceAccount != "" && flags.opServiceAccountTokenEnv != "" {
 		return opAuthContext{}, errors.New("--op-service-account and --op-service-account-token-env are mutually exclusive")
 	}
@@ -59,6 +64,11 @@ func resolveOpAuth(ctx context.Context, flags *rootFlags) (opAuthContext, error)
 		if conflicts := connectEnvConflicts(); len(conflicts) > 0 {
 			return opAuthContext{}, fmt.Errorf("selected service account cannot be used while Connect environment is set; unset %s", strings.Join(conflicts, ", "))
 		}
+		unlock, err := lockServiceAccounts(ctx)
+		if err != nil {
+			return opAuthContext{}, err
+		}
+		defer unlock()
 		meta, _, err := getServiceAccountMetadata(flags.opServiceAccount)
 		if err != nil {
 			return opAuthContext{}, err
@@ -205,14 +215,22 @@ func saveServiceAccountStore(store *serviceAccountStoreFile) error {
 	if err != nil {
 		return fmt.Errorf("marshaling service-account metadata: %w", err)
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(p), ".service-accounts-*.tmp")
+	if err != nil {
 		return fmt.Errorf("writing service-account metadata: %w", err)
 	}
-	if err := os.Chmod(tmp, 0o600); err != nil {
-		return fmt.Errorf("securing service-account metadata: %w", err)
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing service-account metadata: %w", err)
 	}
-	return os.Rename(tmp, p)
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing service-account metadata: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), p); err != nil {
+		return fmt.Errorf("persisting service-account metadata: %w", err)
+	}
+	return nil
 }
 
 func validServiceAccountName(name string) bool {
@@ -288,22 +306,29 @@ func newServiceAccountAddCmd(flags *rootFlags) *cobra.Command {
 			if flags.dryRun {
 				return flags.printJSON(cmd, map[string]any{"dry_run": true, "name": name, "account_hint": strings.TrimSpace(account), "would_store": true})
 			}
-			store, err := loadServiceAccountStore()
-			if err != nil {
-				return err
-			}
-			oldToken := ""
-			if _, exists := store.ServiceAccounts[name]; exists {
-				oldToken, err = serviceAccountSecrets.Get(cmd.Context(), name)
-				if err != nil {
-					return fmt.Errorf("cannot preserve existing service-account token %q; replacement aborted: %w", name, err)
-				}
-			}
+			// Read interactive input before locking; only the transaction holds the lock.
 			token, err := readServiceAccountToken(cmd, flags.noInput, tokenStdin, tokenEnv)
 			if err != nil {
 				return err
 			}
 			defer func() { token = "" }()
+			unlock, err := lockServiceAccounts(cmd.Context())
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			store, err := loadServiceAccountStore()
+			if err != nil {
+				return err
+			}
+			// Keychain can outlive its metadata (for example after a backup restore).
+			// Never treat an unreadable or orphaned credential as a new empty slot.
+			oldToken, err := serviceAccountSecrets.Get(cmd.Context(), name)
+			hadToken := err == nil
+			_, hadMetadata := store.ServiceAccounts[name]
+			if err != nil && (hadMetadata || !errors.Is(err, errServiceAccountSecretNotFound)) {
+				return fmt.Errorf("cannot preserve existing service-account token %q; replacement aborted: %w", name, err)
+			}
 			if err := serviceAccountSecrets.Set(cmd.Context(), name, token); err != nil {
 				return err
 			}
@@ -315,7 +340,7 @@ func newServiceAccountAddCmd(flags *rootFlags) *cobra.Command {
 			store.ServiceAccounts[name] = serviceAccountMetadata{Name: name, Account: strings.TrimSpace(account), CreatedAt: created, UpdatedAt: now}
 			if err := saveServiceAccountStore(store); err != nil {
 				var rollbackErr error
-				if oldToken != "" {
+				if hadToken {
 					rollbackErr = serviceAccountSecrets.Set(context.WithoutCancel(cmd.Context()), name, oldToken)
 				} else {
 					rollbackErr = serviceAccountSecrets.Delete(context.WithoutCancel(cmd.Context()), name)
@@ -377,12 +402,23 @@ func newServiceAccountShowCmd(flags *rootFlags) *cobra.Command {
 
 func newServiceAccountDoctorCmd(flags *rootFlags) *cobra.Command {
 	return &cobra.Command{Use: "doctor <name>", Short: "Verify a named service account without revealing its token", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if flags.opAccount != "" {
+			return errors.New("--op-account cannot be combined with named service-account verification")
+		}
 		if conflicts := connectEnvConflicts(); len(conflicts) > 0 {
 			return fmt.Errorf("selected service account cannot be used while Connect environment is set; unset %s", strings.Join(conflicts, ", "))
 		}
+		unlock, err := lockServiceAccounts(cmd.Context())
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		meta, store, err := getServiceAccountMetadata(args[0])
 		if err != nil {
 			return err
+		}
+		if flags.dryRun {
+			return flags.printJSON(cmd, map[string]any{"dry_run": true, "name": meta.Name, "would_verify": true})
 		}
 		token, err := serviceAccountSecrets.Get(cmd.Context(), meta.Name)
 		if err != nil {
@@ -390,6 +426,12 @@ func newServiceAccountDoctorCmd(flags *rootFlags) *cobra.Command {
 		}
 		auth := opAuthContext{mode: "service-account-profile", serviceAccount: meta.Name, accountHint: meta.Account, tokenSource: "keychain", token: token, explicitToken: true}
 		ctx := context.WithValue(cmd.Context(), opAuthContextKey{}, auth)
+		timeout := flags.timeout
+		if timeout <= 0 {
+			timeout = 60 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
 		_, _, runErr := newOpRunner().command(ctx, "vault", "list", "--format", "json")
 		result := map[string]any{"auth_mode": auth.mode, "op_service_account": meta.Name, "account_hint": meta.Account, "token_source": "keychain", "authenticated": runErr == nil, "connect_env_conflicts": connectEnvConflicts()}
 		if runErr != nil {
@@ -413,10 +455,10 @@ func newServiceAccountRepairAccessCmd(flags *rootFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if _, _, err := getServiceAccountMetadata(name); err != nil {
-				return err
-			}
 			if flags.dryRun {
+				if _, _, err := getServiceAccountMetadata(name); err != nil {
+					return err
+				}
 				return flags.printJSON(cmd, map[string]any{"dry_run": true, "name": name, "would_repair_access": true})
 			}
 			if runtime.GOOS != "darwin" {
@@ -427,6 +469,14 @@ func newServiceAccountRepairAccessCmd(flags *rootFlags) *cobra.Command {
 			}
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
 				return errors.New("Keychain access repair requires a terminal so macOS can request approval")
+			}
+			unlock, err := lockServiceAccounts(cmd.Context())
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			if _, _, err := getServiceAccountMetadata(name); err != nil {
+				return err
 			}
 			if err := repairKeychainAccess(cmd.Context(), serviceAccountKeychainService, name); err != nil {
 				return fmt.Errorf("repairing service-account token %q: %w", name, err)
@@ -443,15 +493,23 @@ func newServiceAccountRepairAccessCmd(flags *rootFlags) *cobra.Command {
 func newServiceAccountRemoveCmd(flags *rootFlags) *cobra.Command {
 	return &cobra.Command{Use: "remove <name>", Short: "Remove a named token and its metadata", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		_, store, err := getServiceAccountMetadata(name)
-		if err != nil {
-			return err
-		}
 		if flags.dryRun {
+			if _, _, err := getServiceAccountMetadata(name); err != nil {
+				return err
+			}
 			return flags.printJSON(cmd, map[string]any{"dry_run": true, "name": name, "would_remove": true})
 		}
 		if !flags.yes {
 			return errors.New("confirmation required: pass --yes")
+		}
+		unlock, err := lockServiceAccounts(cmd.Context())
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		_, store, err := getServiceAccountMetadata(name)
+		if err != nil {
+			return err
 		}
 		token, err := serviceAccountSecrets.Get(cmd.Context(), name)
 		if err != nil {

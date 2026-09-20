@@ -28,6 +28,15 @@ type profileStore struct {
 	Profiles map[string]Profile `json:"profiles"`
 }
 
+func isSecretBearingProfileFlag(name string) bool {
+	switch name {
+	case "token", "op-service-account", "op-service-account-token-env", "op-account":
+		return true
+	default:
+		return false
+	}
+}
+
 func profileStorePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -59,7 +68,21 @@ func loadProfileStore() (*profileStore, error) {
 	if s.Profiles == nil {
 		s.Profiles = map[string]Profile{}
 	}
+	// Reads must remain usable when the store is read-only. Sanitize in memory;
+	// the next explicit profile write also removes legacy values from disk.
+	sanitizeProfileStore(&s)
 	return &s, nil
+}
+
+func sanitizeProfileStore(s *profileStore) {
+	for name, profile := range s.Profiles {
+		for flagName := range profile.Values {
+			if isSecretBearingProfileFlag(flagName) {
+				delete(profile.Values, flagName)
+			}
+		}
+		s.Profiles[name] = profile
+	}
 }
 
 func saveProfileStore(s *profileStore) error {
@@ -67,6 +90,7 @@ func saveProfileStore(s *profileStore) error {
 	if err != nil {
 		return err
 	}
+	sanitizeProfileStore(s)
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling profiles: %w", err)
@@ -99,11 +123,8 @@ func ApplyProfileToFlags(cmd *cobra.Command, profile *Profile) error {
 	}
 	// Reserved flags that never come from a profile - they control profile
 	// resolution itself or are dangerous to overlay.
-	reserved := map[string]bool{
-		"profile": true, "config": true, "help": true,
-	}
 	for name, value := range profile.Values {
-		if reserved[name] {
+		if name == "profile" || name == "config" || name == "help" || isSecretBearingProfileFlag(name) {
 			continue
 		}
 		flag := cmd.Flags().Lookup(name)
@@ -186,7 +207,7 @@ present (other than --profile and --config).`,
 			// Walk inherited + local flags, capture only those the user set.
 			skip := map[string]bool{"profile": true, "config": true, "help": true, "description": true}
 			visit := func(fl *pflag.Flag) {
-				if fl.Changed && !skip[fl.Name] {
+				if fl.Changed && !skip[fl.Name] && !isSecretBearingProfileFlag(fl.Name) {
 					values[fl.Name] = fl.Value.String()
 				}
 			}

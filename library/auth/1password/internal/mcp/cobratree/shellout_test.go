@@ -11,6 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	mcplib "github.com/mark3labs/mcp-go/mcp"
+	"github.com/spf13/cobra"
 )
 
 // TestSplitShellArgs pins the whitespace + quote splitting used by
@@ -53,22 +56,25 @@ func TestSplitShellArgs(t *testing.T) {
 // load a malicious --config.
 func TestCliArgsFromMCP_BlocksRootFlags(t *testing.T) {
 	in := map[string]any{
-		"args":     "contacts",
-		"base-url": "https://evil.example.com",
-		"client":   "attacker-client",
-		"config":   "/tmp/evil.yaml",
-		"deliver":  "fd:3",
-		"profile":  "attacker",
-		"token":    "stolen-token",
+		"args":                         "contacts",
+		"base-url":                     "https://evil.example.com",
+		"client":                       "attacker-client",
+		"config":                       "/tmp/evil.yaml",
+		"deliver":                      "fd:3",
+		"profile":                      "attacker",
+		"token":                        "stolen-token",
+		"op-service-account":           "attacker-account",
+		"op-service-account-token-env": "ATTACKER_TOKEN",
+		"op-account":                   "attacker.1password.com",
 		// Allowed per-command flag passes through.
 		"limit": float64(10),
 	}
 	got := cliArgsFromMCP(in)
-	want := []string{"--limit", "10"}
+	want := []string{"--limit=10"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("cliArgsFromMCP dropped/kept wrong keys: got %v, want %v", got, want)
 	}
-	for _, blocked := range []string{"--base-url", "--client", "--config", "--deliver", "--profile", "--token", "--args"} {
+	for _, blocked := range []string{"--base-url", "--client", "--config", "--deliver", "--profile", "--token", "--op-service-account", "--op-service-account-token-env", "--op-account", "--args"} {
 		for _, tok := range got {
 			if tok == blocked {
 				t.Errorf("blocked flag %q leaked through cliArgsFromMCP", blocked)
@@ -93,9 +99,56 @@ func TestCliArgsFromMCP_AllowsPerCommandFlags(t *testing.T) {
 		"tags":    []any{"a", "b"},
 	}
 	got := cliArgsFromMCP(in)
-	want := []string{"--limit", "25", "--query", "alpha", "--tags", "a,b", "--verbose"}
+	want := []string{"--limit=25", "--query=alpha", "--tags=a,b", "--verbose"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("cliArgsFromMCP per-command passthrough: got %v, want %v", got, want)
+	}
+}
+
+func TestStructuredParameterNamesCannotInjectFlags(t *testing.T) {
+	for _, key := range []string{"op-service-account", "op-service-account-token-env", "op-account", "config", "op-service-account=other", "op-service-account-token-env=OTHER_TOKEN", "op-account=other", "config=/tmp/other", "--config", "", "query\n--token"} {
+		t.Run(key, func(t *testing.T) {
+			bin := writeShelloutHelper(t, "success")
+			handler := shellOutToCLI(func() (string, error) { return bin, nil }, nil)
+			var req mcplib.CallToolRequest
+			req.Params.Arguments = map[string]any{key: true}
+			result, err := handler(context.Background(), req)
+			if err != nil || result == nil || !result.IsError {
+				t.Fatalf("malformed key reached the CLI: result=%#v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestToolSchemaOmitsBlockedRootFlags(t *testing.T) {
+	root := &cobra.Command{Use: "helper"}
+	for name := range blockedRootFlags {
+		root.PersistentFlags().String(name, "", "blocked")
+	}
+	child := &cobra.Command{Use: "read"}
+	child.Flags().String("vault", "", "vault")
+	root.AddCommand(child)
+	tool := mcplib.NewTool("read", toolOptionsForFlags(child)...)
+	if _, ok := tool.InputSchema.Properties["vault"]; !ok {
+		t.Fatal("ordinary command flag missing from schema")
+	}
+	for name := range blockedRootFlags {
+		if _, ok := tool.InputSchema.Properties[name]; ok {
+			t.Errorf("blocked process configuration %q advertised in schema", name)
+		}
+	}
+}
+
+func TestStructuredValueCannotBecomeAnotherFlag(t *testing.T) {
+	var verbose bool
+	var account string
+	called := false
+	cmd := &cobra.Command{Use: "helper", SilenceErrors: true, SilenceUsage: true, Run: func(*cobra.Command, []string) { called = true }}
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "verbose")
+	cmd.Flags().StringVar(&account, "op-service-account", "original", "account")
+	cmd.SetArgs(cliArgsFromMCP(map[string]any{"verbose": "--op-service-account=other"}))
+	if err := cmd.Execute(); err == nil || called || account != "original" {
+		t.Fatalf("structured value changed authentication: account=%q called=%v err=%v", account, called, err)
 	}
 }
 

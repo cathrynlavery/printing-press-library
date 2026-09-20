@@ -2,7 +2,11 @@
 
 package cli
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+)
 
 func TestParseRef(t *testing.T) {
 	tests := []struct {
@@ -150,5 +154,26 @@ func TestRefsInTextDeduplicatesReferences(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("refsInText[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestDocumentsReadRequiresExactReferenceAndReveal(t *testing.T) {
+	t.Setenv("PRINTING_PRESS_VERIFY", "1")
+	flags := &rootFlags{asJSON: true}
+	command := newNovelDocumentsReadCmd(flags)
+	var output bytes.Buffer
+	command.SetOut(&output)
+	command.SetArgs([]string{"op://Synthetic/GA4/service-account.json", "--reveal"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); !strings.Contains(got, `"kind": "document_or_attachment"`) || !strings.Contains(got, `"value": "redacted"`) {
+		t.Fatalf("verify output = %s", got)
+	}
+
+	command = newNovelDocumentsReadCmd(flags)
+	command.SetArgs([]string{"not-an-op-reference", "--reveal"})
+	if err := command.Execute(); err == nil {
+		t.Fatal("documents read accepted a non-exact reference")
 	}
 }

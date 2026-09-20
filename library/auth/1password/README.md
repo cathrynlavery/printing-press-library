@@ -211,6 +211,12 @@ These capabilities aren't available in any other tool for this API.
   1password-pp-cli documents audit --json
   ```
 
+- **`documents read`** — Stream one exact document or attachment reference only after policy checks and an explicit `--reveal` gate. The value is never written by the CLI unless the caller deliberately redirects stdout.
+
+  ```bash
+  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal --agent
+  ```
+
 ### Sharing
 - **`share preflight`** — Before sharing an item, show recipient, item category, included fields, expiry, and risk.
 
@@ -332,7 +338,32 @@ For automation, set a 1Password service-account token:
 export OP_SERVICE_ACCOUNT_TOKEN="<service-account-token>"
 ```
 
-For local desktop workflows, sign in with `op` using the normal 1Password CLI or desktop-app integration. This CLI warns when `OP_CONNECT_HOST` or `OP_CONNECT_TOKEN` is set because those Connect variables take precedence over service-account auth in `op`.
+To keep multiple accounts available without changing the shell-global token, store each token in macOS Keychain. The metadata file contains only the name, account hint, and timestamps:
+
+```bash
+1password-pp-cli service-accounts add team --account example-team.1password.com
+1password-pp-cli service-accounts add sandbox --account example-sandbox.1password.com
+1password-pp-cli --op-service-account team op --agent
+1password-pp-cli secrets resolve --query "Cloudflare token for automation@example.com" --op-service-account team --agent
+```
+
+The add command uses a masked prompt by default; `--token-stdin` and `--token-env NAME` are available for non-interactive setup. On platforms without macOS Keychain, use `--op-service-account-token-env NAME` for one invocation. Token values are never accepted as flags or saved in ordinary profiles. Explicit named/env selection fails rather than falling back when the token is missing or Connect environment variables are set.
+
+For unattended agents on macOS, install a consistently code-signed binary. If an account was added before the binary received its stable signing identity, repair its Keychain ACL once from a local Terminal and approve the macOS prompt:
+
+```bash
+1password-pp-cli service-accounts repair-access team --json
+```
+
+The repair changes only the Keychain access policy. It never reads, prints, or rewrites the token value.
+
+For local source installs, keep the signing identity stable across updates:
+
+```bash
+make install-signed-macos MACOS_CODESIGN_IDENTITY="Developer ID Application: YOUR ORGANIZATION (TEAMID)"
+```
+
+For local desktop workflows, sign in with `op` using the normal 1Password CLI or desktop-app integration; `--op-account` selects an account for the child `op` process. Explicit service-account selection fails when `OP_CONNECT_HOST` or `OP_CONNECT_TOKEN` is set because those Connect variables can take precedence.
 
 ## Configuration
 

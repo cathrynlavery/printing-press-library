@@ -101,18 +101,22 @@ func (r opRunner) command(ctx context.Context, args ...string) ([]byte, []byte, 
 		return nil, nil, fmt.Errorf("op CLI not found on PATH: install 1Password CLI v2.18.0 or newer")
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
+	auth := opAuthFromContext(ctx)
+	cmd.Env = auth.childEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err = cmd.Run()
+	stdoutBytes := auth.redact(stdout.Bytes())
+	stderrBytes := auth.redact(stderr.Bytes())
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(string(stderrBytes))
 		if msg == "" {
 			msg = err.Error()
 		}
-		return stdout.Bytes(), stderr.Bytes(), fmt.Errorf("op %s failed: %s", strings.Join(args, " "), msg)
+		return stdoutBytes, stderrBytes, fmt.Errorf("op %s failed: %s", strings.Join(args, " "), msg)
 	}
-	return stdout.Bytes(), stderr.Bytes(), nil
+	return stdoutBytes, stderrBytes, nil
 }
 
 func (r opRunner) json(ctx context.Context, args []string, v any) error {
@@ -172,7 +176,7 @@ func remarshal(src, dst any) error {
 }
 
 func connectEnvConflicts() []string {
-	var out []string
+	out := []string{}
 	for _, name := range []string{"OP_CONNECT_HOST", "OP_CONNECT_TOKEN"} {
 		if os.Getenv(name) != "" {
 			out = append(out, name)
@@ -181,16 +185,7 @@ func connectEnvConflicts() []string {
 	return out
 }
 
-func authMode() string {
-	switch {
-	case os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") != "":
-		return "service-account"
-	case os.Getenv("OP_ACCOUNT") != "":
-		return "desktop-or-session"
-	default:
-		return "op-default"
-	}
-}
+func authMode(ctx context.Context) string { return opAuthFromContext(ctx).mode }
 
 func listItems(ctx context.Context, vault, categories string) ([]opItemSummary, error) {
 	args := []string{"item", "list"}
@@ -391,11 +386,19 @@ func newOpPromotedCmd(flags *rootFlags) *cobra.Command {
 		Short:       "Show op installation and authentication status without reading secret values",
 		Annotations: map[string]string{"pp:endpoint": "op.status", "pp:method": "GET", "pp:path": "/status", "mcp:read-only": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			auth := opAuthFromContext(cmd.Context())
 			status := map[string]any{
-				"auth_mode":             authMode(),
+				"auth_mode":             auth.mode,
 				"connect_env_conflicts": connectEnvConflicts(),
 				"authenticated":         false,
 				"verify_noop":           cliutil.IsVerifyEnv(),
+				"token_source":          auth.tokenSource,
+			}
+			if auth.serviceAccount != "" {
+				status["op_service_account"] = auth.serviceAccount
+			}
+			if auth.accountHint != "" {
+				status["account_hint"] = auth.accountHint
 			}
 			if path, err := exec.LookPath("op"); err == nil {
 				status["op_path"] = path
@@ -411,7 +414,11 @@ func newOpPromotedCmd(flags *rootFlags) *cobra.Command {
 				status["op_version"] = strings.TrimSpace(string(out))
 			}
 			if len(connectEnvConflicts()) == 0 {
-				if _, _, err := newOpRunner().command(cmd.Context(), "user", "get", "--me", "--format", "json"); err == nil {
+				checkArgs := []string{"user", "get", "--me", "--format", "json"}
+				if strings.HasPrefix(auth.mode, "service-account") {
+					checkArgs = []string{"vault", "list", "--format", "json"}
+				}
+				if _, _, err := newOpRunner().command(cmd.Context(), checkArgs...); err == nil {
 					status["authenticated"] = true
 				} else {
 					status["auth_error"] = err.Error()
@@ -480,6 +487,59 @@ func newNovelSecretsReadCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&reveal, "reveal", false, "Print the secret value after policy checks")
+	return cmd
+}
+
+// newNovelDocumentsReadCmd is the exact-reference document/attachment byte
+// surface used by platform credential resolvers such as the GA4 service-account
+// adapter. It deliberately mirrors secrets read's reveal and policy gates and
+// never accepts a fuzzy item lookup or output path.
+func newNovelDocumentsReadCmd(flags *rootFlags) *cobra.Command {
+	var reveal bool
+	cmd := &cobra.Command{
+		Use:         "read <op://vault/item/document>",
+		Short:       "Read one exact document or attachment reference after an explicit reveal gate",
+		Args:        cobra.ExactArgs(1),
+		Annotations: map[string]string{"mcp:read-only": "true"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ref, err := parseRef(args[0])
+			if err != nil {
+				return usageErr(err)
+			}
+			path := strings.TrimPrefix(args[0], "op://")
+			if strings.Contains(args[0], "?") || strings.Contains(path, "//") || ref.Vault == "" || ref.Item == "" || ref.Field == "" || strings.Count(path, "/") > 3 {
+				return usageErr(fmt.Errorf("document reference must be op://vault/item/[section/]file without query parameters"))
+			}
+			plan := map[string]any{"ref": ref, "kind": "document_or_attachment", "policy": policyDecision(ref), "would_reveal": reveal}
+			if flags.dryRun || !reveal || cliutil.IsVerifyEnv() {
+				plan["value"] = "redacted"
+				plan["hint"] = "pass --reveal to stream the exact document bytes to stdout"
+				return flags.printJSON(cmd, plan)
+			}
+			if deny, reason := denyRef(ref); deny {
+				return fmt.Errorf("policy denied document reveal: %s", reason)
+			}
+			runner := newOpRunner()
+			// The official type attribute resolves this exact field without
+			// retrieving its value or any other fields from the item.
+			kind, _, err := runner.command(cmd.Context(), "read", args[0]+"?attribute=type")
+			if err != nil {
+				return fmt.Errorf("cannot verify document or attachment type: %w", err)
+			}
+			if !strings.EqualFold(strings.TrimSpace(string(kind)), "file") {
+				return fmt.Errorf("reference does not resolve to a document or attachment")
+			}
+			// Request the file-only content attribute rather than the generic
+			// field value, so a changed reference cannot reveal a secret field.
+			out, _, err := runner.command(cmd.Context(), "read", args[0]+"?attribute=content")
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(out)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&reveal, "reveal", false, "Stream the exact document bytes to stdout after policy checks")
 	return cmd
 }
 
@@ -918,7 +978,7 @@ func newNovelAccessScopeCmd(flags *rootFlags) *cobra.Command {
 			if err := newOpRunner().json(cmd.Context(), []string{"vault", "list"}, &vaults); err != nil {
 				return err
 			}
-			summary := map[string]any{"auth_mode": authMode(), "connect_env_conflicts": connectEnvConflicts(), "vault_count": len(vaults), "vaults": []any{}}
+			summary := map[string]any{"auth_mode": authMode(cmd.Context()), "connect_env_conflicts": connectEnvConflicts(), "vault_count": len(vaults), "vaults": []any{}}
 			var vaultOut []map[string]any
 			for _, vault := range vaults {
 				items, _ := listItems(cmd.Context(), firstNonEmpty(vault.ID, vault.Name), "")
@@ -948,16 +1008,16 @@ func newNovelRateLimitStatusCmd(flags *rootFlags) *cobra.Command {
 				opArgs = append(opArgs, serviceAccount)
 			}
 			if err := newOpRunner().json(cmd.Context(), opArgs, &data); err != nil {
-				if os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") == "" && serviceAccount == "" {
+				if !strings.HasPrefix(authMode(cmd.Context()), "service-account") && serviceAccount == "" {
 					return flags.printJSON(cmd, map[string]any{
 						"supported": false,
-						"auth_mode": authMode(),
+						"auth_mode": authMode(cmd.Context()),
 						"reason":    "op service-account ratelimit needs OP_SERVICE_ACCOUNT_TOKEN or an explicit --service-account when using desktop/session auth",
 					})
 				}
 				return err
 			}
-			return flags.printJSON(cmd, map[string]any{"rate_limit": data, "auth_mode": authMode()})
+			return flags.printJSON(cmd, map[string]any{"rate_limit": data, "auth_mode": authMode(cmd.Context())})
 		},
 	}
 	cmd.Flags().StringVar(&serviceAccount, "service-account", "", "Service account name or ID for desktop/session-authenticated op")
@@ -1065,6 +1125,7 @@ func attachOpAgentExamples(root *cobra.Command) {
 		"cards resolve":       "  1password-pp-cli cards resolve --query \"card\" --json",
 		"documents audit":     "  1password-pp-cli documents audit --json",
 		"documents inventory": "  1password-pp-cli documents inventory --json",
+		"documents read":      "  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal --agent",
 		"env inject":          "  1password-pp-cli env inject --in-file README.md --out-file injected.env --json",
 		"env plan":            "  1password-pp-cli env plan API_TOKEN= --json",
 		"items classify":      "  1password-pp-cli items classify --json",

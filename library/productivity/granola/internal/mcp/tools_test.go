@@ -6,7 +6,33 @@ package mcp
 import (
 	"strings"
 	"testing"
+
+	"github.com/mark3labs/mcp-go/server"
 )
+
+func TestRegisterToolsIncludesGranolaV15CommandMirror(t *testing.T) {
+	s := server.NewMCPServer("granola-test", "0")
+	RegisterTools(s)
+	tools := s.ListTools()
+
+	for _, name := range []string{"audit_list", "transcript_get", "webhooks_list", "webhooks_create", "webhooks_update", "webhooks_delete", "webhooks_verify"} {
+		if tools[name] == nil {
+			t.Errorf("MCP tool %q is missing", name)
+		}
+	}
+	for _, name := range []string{"audit_list", "transcript_get", "webhooks_list", "webhooks_verify"} {
+		tool := tools[name]
+		if tool == nil || tool.Tool.Annotations.ReadOnlyHint == nil || !*tool.Tool.Annotations.ReadOnlyHint {
+			t.Errorf("MCP tool %q should be annotated read-only", name)
+		}
+	}
+	for _, name := range []string{"webhooks_create", "webhooks_update", "webhooks_delete"} {
+		tool := tools[name]
+		if tool != nil && tool.Tool.Annotations.ReadOnlyHint != nil && *tool.Tool.Annotations.ReadOnlyHint {
+			t.Errorf("MCP mutation %q must not be annotated read-only", name)
+		}
+	}
+}
 
 // TestValidateReadOnlyQuery_AllowsSelectAndWITH pins the contract: the MCP
 // sql tool's allowlist accepts SELECT and WITH-prefix queries, including

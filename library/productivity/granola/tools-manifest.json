@@ -8,7 +8,9 @@
     "type": "bearer_token",
     "header": "Authorization",
     "env_vars": [
-      "GRANOLA_API_KEY"
+      "GRANOLA_API_KEY",
+      "GRANOLA_AUDIT_API_KEY",
+      "GRANOLA_WEBHOOK_SECRET"
     ],
     "env_var_specs": [
       {
@@ -17,6 +19,20 @@
         "required": false,
         "sensitive": true,
         "description": "Granola public API key, created in Granola desktop under Settings → Connectors → API keys. Creating one requires a Business or Enterprise Granola workspace; personal and free workspaces cannot issue keys. Needed to fetch new meeting data via `sync-api`, because current Granola desktop builds keep the local cache encryption key in an entitlement-gated macOS keychain group that no third-party binary can read. Reading data already synced into the local store needs no key at all."
+      },
+      {
+        "name": "GRANOLA_AUDIT_API_KEY",
+        "kind": "per_call",
+        "required": false,
+        "sensitive": true,
+        "description": "Dedicated Granola audit-log API key."
+      },
+      {
+        "name": "GRANOLA_WEBHOOK_SECRET",
+        "kind": "per_call",
+        "required": false,
+        "sensitive": true,
+        "description": "Webhook signing secret used only for offline delivery verification."
       }
     ]
   },
@@ -65,7 +81,7 @@
     },
     {
       "name": "notes_list",
-      "description": "List notes. Optional: created_before, created_after, updated_after (plus 2 more). Returns the ListNotesOutput.",
+      "description": "List notes. Optional: created_before, created_after, updated_after, folder_id, cursor, page_size. Returns the ListNotesOutput.",
       "method": "GET",
       "path": "/v1/notes",
       "params": [
@@ -86,6 +102,12 @@
           "type": "string",
           "location": "query",
           "description": "Updated after"
+        },
+        {
+          "name": "folder_id",
+          "type": "string",
+          "location": "query",
+          "description": "Only notes in this folder"
         },
         {
           "name": "cursor",

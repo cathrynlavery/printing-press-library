@@ -24,6 +24,17 @@ func TestSourceSeconds_MicAndSystem(t *testing.T) {
 	}
 }
 
+func TestSourceSecondsPrefersAPIAttribution(t *testing.T) {
+	segs := []granola.TranscriptSegment{
+		{Source: "system", Attribution: "me", StartTimestamp: "2026-05-01T10:00:00Z", EndTimestamp: "2026-05-01T10:00:10Z"},
+		{Source: "microphone", Attribution: "them", StartTimestamp: "2026-05-01T10:00:10Z", EndTimestamp: "2026-05-01T10:00:30Z"},
+	}
+	mic, sys := sourceSeconds(segs)
+	if mic != 10 || sys != 20 {
+		t.Fatalf("attributed seconds = mic %v / system %v, want 10 / 20", mic, sys)
+	}
+}
+
 func TestAggregateBySources(t *testing.T) {
 	segs := []granola.TranscriptSegment{
 		{Source: "microphone", StartTimestamp: "2026-05-01T10:00:00Z", EndTimestamp: "2026-05-01T10:00:30Z", Confidence: 0.9},

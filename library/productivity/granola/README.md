@@ -1,6 +1,6 @@
 # Granola CLI
 
-**Every Granola feature — plus offline SQLite cross-meeting search, attendee timelines, and a MEMO pipeline runner no other Granola tool has.**
+**Granola notes, transcripts, audit events, and webhooks — plus offline SQLite cross-meeting search, attendee timelines, and a MEMO pipeline runner.**
 
 granola-pp-cli hydrates a local SQLite store from Granola — via the public REST API on current desktop builds, or via the desktop's own cache on pre-migration builds — and adds the queries Granola.ai’s web app and existing community CLIs cannot answer. Reads serve from the local store first, so memo run, memo queue, attendee timeline, recipes coverage, calendar overlay, and talktime are offline local-data joins no per-meeting tool produces. Agent-native JSON by default.
 
@@ -144,7 +144,7 @@ Transcripts backfill incrementally, because there is no bulk transcript endpoint
 
 Recipes, panel templates, folders and folder membership hydrate on this tier too — each is a single API call, refreshed on every degraded `sync`.
 
-With a `GRANOLA_API_KEY`, hydrated by `sync-api`: all of the above plus note summaries (`summary_markdown`).
+With a `GRANOLA_API_KEY`, `sync-api` hydrates public-API notes, generated summaries, owner-only private notes (when returned), folder membership, speaker attribution, and complete transcripts. Long transcripts use the dedicated paginated endpoint automatically when note detail is too large. `notes list --folder-id` applies Granola's server-side folder filter.
 
 Live on the same session, needing no sync: AI panels (`panel get`, and the `--panel` inlining in `attendee brief` and `folder stream`) and workspaces (`workspaces list`). Both read from the API on each call. Note `panel get` has no local fallback, so a lapsed session breaks it where other commands degrade to stored data.
 
@@ -178,7 +178,7 @@ If you kept a copy of `storage.dek` from before the migration, base64-encode its
 
 ## Quick Start
 
-Hydrate the local store first. On a current install that is `granola-pp-cli sync-api` with `GRANOLA_API_KEY` set; narrow repeat runs with `granola-pp-cli sync-api --since 7d`. On a pre-migration install, `granola-pp-cli sync` reads the desktop cache instead. Running both against the same store is safe in either order — each sync path clears only the rows it owns, and neither will replace a stored transcript with a smaller copy from the other source (upstream retention prunes older transcripts; this store outlives it). Preserved transcripts are reported as `preserved_transcripts` in the sync summary with a warning naming the meetings.
+Hydrate the local store first. On a current install, run `granola-pp-cli auth login` once and then `granola-pp-cli sync`. Business and Enterprise workspaces can instead set `GRANOLA_API_KEY` and run `granola-pp-cli sync-api`; narrow repeat runs with `--since 7d`. On a pre-migration install, `sync` can also read the desktop cache. Running the cache and public-API paths against the same store is safe in either order — each clears only the rows it owns, and neither replaces a stored transcript with a smaller copy from the other source. Preserved transcripts are reported as `preserved_transcripts` with a warning naming the meetings.
 
 Then read, offline and keyless:
 
@@ -201,6 +201,27 @@ granola-pp-cli attendee timeline alice@example.com --since 60d --json --select i
 # Meetings missing the Discovery panel — the Friday retro gap. Pre-migration installs only.
 granola-pp-cli recipes coverage --since 14d --json
 ```
+
+### Audit and webhooks
+
+Audit uses its own credential and pages serially in Granola's stable `collected_at` order:
+
+```bash
+export GRANOLA_AUDIT_API_KEY="..."
+granola-pp-cli audit list --action workspace --occurred-after 2026-09-01 --all --json
+```
+
+Webhook endpoint management uses `GRANOLA_API_KEY`. Creation returns the signing secret once, so capture stdout securely. Deletion requires `--yes`. Verification is offline and must receive the exact raw body:
+
+```bash
+granola-pp-cli webhooks create --url https://example.com/granola --scope personal --event note.generated
+export GRANOLA_WEBHOOK_SECRET="whsec_..."
+granola-pp-cli webhooks verify --body-file payload.json \
+  --webhook-id "$WEBHOOK_ID" --webhook-timestamp "$WEBHOOK_TIMESTAMP" \
+  --webhook-signature "$WEBHOOK_SIGNATURE"
+```
+
+Granola retries failed deliveries with exponential backoff for four days and reuses `event_id`; receivers should deduplicate on that value. Events produced while an endpoint is paused are not replayed after it is re-enabled.
 
 ## Unique Features
 
@@ -320,6 +341,7 @@ This CLI exposes 35+ commands. Use `granola-pp-cli --help` for the canonical tre
 | **Granola entities** | `folders`, `folder list / stream`, `recipes list / describe / coverage`, `workspaces list` |
 | **Public API mirrors** | `notes list / get`, `folders` (require `GRANOLA_API_KEY`) |
 | **Sync / system** | `sync` (desktop cache), `sync-api` (public API), `doctor`, `db schema` (local store path, tables, columns), `auth setup / status / set-token / logout`, `which`, `agent-context`, `version`, `import` |
+| **Public API administration** | `audit list` (requires `GRANOLA_AUDIT_API_KEY`), `webhooks list / create / update / delete`, `webhooks verify` |
 | **GUI bridge (macOS only)** | `warm <id> <query>` — prints by default; `--launch` activates the Granola desktop app |
 
 ## Output Formats
@@ -349,8 +371,8 @@ This CLI is designed for AI agent consumption:
 - **Pipeable** - `--json` output to stdout, errors to stderr
 - **Filterable** - `--select id,name` returns only fields you need
 - **Previewable** - `--dry-run` shows the request without sending
-- **Read-only by default with a narrow opt-in write surface** — `meetings delete`, `meetings restore`, `import`, and `warm --launch` mutate state; everything else inspects, exports, syncs, or analyzes
-- **Offline-friendly** - once hydrated by `sync` or `sync-api`, every read command serves from the local SQLite store with no network call and no API key
+- **Read-only by default with a narrow opt-in write surface** — `webhooks create / update / delete`, `meetings delete / restore`, `import`, and `warm --launch` mutate state; webhook deletion requires `--yes`
+- **Offline-friendly data reads** - once hydrated by `sync` or `sync-api`, meeting and analytics reads serve from SQLite; audit and webhook management remain live API operations
 - **Agent-safe by default** - no colors or formatting unless `--human-friendly` is set
 
 Exit codes: `0` success, `2` usage error, `3` not found, `4` auth error, `5` API error, `7` rate limited, `10` config error.
@@ -365,7 +387,7 @@ On a migrated install the cache leg always fails — the file is present, so the
 
 A one-line provenance summary lands on stderr in interactive mode: `auto-refresh: cache=ok (1.2s, 47 rows)`. It is suppressed under `--agent`, `--json`, `--compact`, `--quiet`, and when stderr is piped — so agent and CI consumers see no chatter on stdout or stderr.
 
-Opt out with `--no-refresh` for a single command, `GRANOLA_NO_AUTO_REFRESH=1` for a shell session or CI job, or by saving a profile with `--no-refresh` (`granola-pp-cli profile save fast --no-refresh`). The skip list (commands that never auto-refresh) is `sync`, `sync-api`, `auth`, `doctor`, `help`, `version`, `completion`, `agent-context`, `profile`, `feedback`, `which`. Run `granola-pp-cli agent-context --json` to see the full contract as structured JSON.
+Opt out with `--no-refresh` for a single command, `GRANOLA_NO_AUTO_REFRESH=1` for a shell session or CI job, or by saving a profile with `--no-refresh` (`granola-pp-cli profile save fast --no-refresh`). The skip list (commands that never auto-refresh) is `sync`, `sync-api`, `auth`, `doctor`, `help`, `version`, `completion`, `agent-context`, `profile`, `feedback`, `which`, `audit`, and `webhooks`. Run `granola-pp-cli agent-context --json` to see the full contract as structured JSON.
 
 Neither leg pokes Granola desktop into pulling from Granola servers. The cache leg is bounded by whatever the desktop has already pulled; the api leg is bounded by what Granola's servers have already published for the note.
 
@@ -390,6 +412,8 @@ Environment variables:
 | Name | Kind | Required | Description |
 | --- | --- | --- | --- |
 | `GRANOLA_API_KEY` | per_call | To fetch new data | Granola public API key. Created in Granola desktop under Settings → Connectors → API keys; **requires a Business or Enterprise Granola workspace**. Not needed to read data already in the local store. |
+| `GRANOLA_AUDIT_API_KEY` | per_call | For `audit list` | Dedicated audit-log API key. Granola audit keys are separate from regular API keys. |
+| `GRANOLA_WEBHOOK_SECRET` | per_call | For `webhooks verify` | One-time webhook signing secret (`whsec_…`). Read only from the environment; never accepted as a command-line flag. |
 | `GRANOLA_CACHE_PATH` | path | No | Override the desktop cache file location. |
 | `GRANOLA_SAFESTORAGE_KEY_OVERRIDE` | secret | No | Base64 of a 32-byte Granola DEK, for decrypting the desktop cache with a pre-migration key. |
 | `GRANOLA_NO_AUTO_REFRESH` | flag | No | Set to `1` to skip the auto-refresh that runs before every command. |

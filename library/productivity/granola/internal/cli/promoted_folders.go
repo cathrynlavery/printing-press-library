@@ -32,7 +32,7 @@ func newFoldersPromotedCmd(flags *rootFlags) *cobra.Command {
 			data, prov, err := resolvePaginatedRead(cmd.Context(), c, flags, "folders", path, map[string]string{
 				"cursor":    fmt.Sprintf("%v", flagCursor),
 				"page_size": fmt.Sprintf("%v", flagPageSize),
-			}, nil, flagAll, "cursor", "", "hasMore")
+			}, nil, flagAll, "cursor", "cursor", "hasMore")
 			if err != nil {
 				return classifyAPIError(err, flags)
 			}

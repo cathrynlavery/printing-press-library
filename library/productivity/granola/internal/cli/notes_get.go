@@ -5,9 +5,12 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
+	"github.com/mvanhorn/printing-press-library/library/productivity/granola/internal/client"
+	"github.com/mvanhorn/printing-press-library/library/productivity/granola/internal/granola"
 	"github.com/spf13/cobra"
 )
 
@@ -48,6 +51,22 @@ func newNotesGetCmd(flags *rootFlags) *cobra.Command {
 				params["include"] = fmt.Sprintf("%v", flagInclude)
 			}
 			data, prov, err := resolveRead(cmd.Context(), c, flags, "notes", false, path, params, nil)
+			var apiErr *client.APIError
+			if err != nil && flagInclude == "transcript" && errors.As(err, &apiErr) && apiErr.StatusCode == 413 {
+				// Long meetings cannot embed their transcript in note detail.
+				// Retry detail without include, then follow the dedicated endpoint.
+				note, detailErr := granola.GetNote(c, args[0], false)
+				if detailErr != nil {
+					return classifyAPIError(detailErr, flags)
+				}
+				transcript, transcriptErr := granola.GetTranscriptAll(c, args[0], granola.TranscriptPageSizeMax)
+				if transcriptErr != nil {
+					return classifyAPIError(transcriptErr, flags)
+				}
+				note.Transcript = transcript
+				data, err = json.Marshal(note)
+				prov = DataProvenance{Source: "live"}
+			}
 			if err != nil {
 				return classifyAPIError(err, flags)
 			}

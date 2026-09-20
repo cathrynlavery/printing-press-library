@@ -61,7 +61,11 @@ func IsUUID(s string) bool {
 // the conflicting row, falls back to the column default, and silently
 // reassigns every API-owned catalog row to the cache path — while blanking
 // the folder metadata columns it does not know exist.
-const StoreSchemaVersion = 4
+//
+// PATCH(granola-api-v1-5-and-webhooks): bumped 4 -> 5 to keep owner-written
+// private notes separate from generated summaries and to retain public API
+// speaker attribution on transcript segments.
+const StoreSchemaVersion = 5
 
 const resourcesFTSCreateSQL = `CREATE VIRTUAL TABLE IF NOT EXISTS resources_fts USING fts5(
 	id, resource_type, content, tokenize='porter unicode61'
@@ -115,6 +119,9 @@ func OpenWithContext(ctx context.Context, dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("creating db directory: %w", err)
 	}
+	if err := rejectNewerSchemaFast(ctx, dbPath); err != nil {
+		return nil, err
+	}
 
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(268435456)")
 	if err != nil {
@@ -133,6 +140,33 @@ func OpenWithContext(ctx context.Context, dbPath string) (*Store, error) {
 	}
 
 	return s, nil
+}
+
+// rejectNewerSchemaFast probes an existing database without the writable
+// connection's journal_mode(WAL) pragma. That pragma needs a write lock even
+// before migrate can read user_version, so a peer holding BEGIN IMMEDIATE
+// would otherwise delay the downgrade-safety rejection for the full lock
+// timeout. Errors are deliberately non-fatal here: migrate performs the
+// authoritative checked read once the normal connection is available.
+func rejectNewerSchemaFast(ctx context.Context, dbPath string) error {
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil
+	}
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(100)")
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	var current int
+	if err := db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&current); err != nil {
+		return nil
+	}
+	if current > StoreSchemaVersion {
+		return fmt.Errorf("database schema version %d is newer than supported version %d; upgrade the CLI binary or open an older database", current, StoreSchemaVersion)
+	}
+	return nil
 }
 
 func (s *Store) Close() error {
@@ -250,6 +284,16 @@ func (s *Store) backfillColumns(ctx context.Context, conn *sql.Conn) error {
 		{table: "sync_state", column: "last_cursor", decl: "TEXT"},
 		{table: "sync_state", column: "last_synced_at", decl: "DATETIME"},
 		{table: "sync_state", column: "total_count", decl: "INTEGER DEFAULT 0"},
+		// Granola v1.5 exposes owner-written private notes separately from
+		// generated summaries. Older binaries collapsed both into notes_*;
+		// schema v5 keeps the streams distinct and preserves speaker identity.
+		{table: "meetings", column: "summary_markdown", decl: "TEXT"},
+		{table: "meetings", column: "summary_plain", decl: "TEXT"},
+		{table: "meetings", column: "notes_markdown", decl: "TEXT"},
+		{table: "meetings", column: "notes_plain", decl: "TEXT"},
+		{table: "meetings", column: "creation_source", decl: "TEXT"},
+		{table: "meetings", column: "row_source", decl: "TEXT NOT NULL DEFAULT 'cache'"},
+		{table: "transcript_segments", column: "attribution", decl: "TEXT"},
 	} {
 		if err := s.ensureColumn(ctx, conn, c.table, c.column, c.decl); err != nil {
 			return err
@@ -259,9 +303,19 @@ func (s *Store) backfillColumns(ctx context.Context, conn *sql.Conn) error {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("acquiring migration connection: %w", err)
+	// Opening the first physical connection runs the DSN pragmas. On a fresh
+	// database, concurrent callers can race while journal_mode(WAL) creates
+	// the WAL files, so even db.Conn itself can return SQLITE_BUSY before the
+	// migration lock exists. Give connection bootstrap the same single,
+	// bounded contention budget as the rest of migration setup.
+	deadline := time.Now().Add(migrationLockTimeout)
+	var conn *sql.Conn
+	if err := retryOnBusy(ctx, deadline, "acquiring migration connection", func() error {
+		var err error
+		conn, err = s.db.Conn(ctx)
+		return err
+	}); err != nil {
+		return err
 	}
 	defer conn.Close()
 
@@ -269,7 +323,6 @@ func (s *Store) migrate(ctx context.Context) error {
 	// opening a newer-schema DB rejects immediately. WAL readers don't
 	// normally block on writers, but the fresh-DB WAL-init race can BUSY
 	// a SELECT — share the lock's deadline so total budget stays bounded.
-	deadline := time.Now().Add(migrationLockTimeout)
 	var current int
 	if err := retryOnBusy(ctx, deadline, "reading schema version", func() error {
 		return conn.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&current)
@@ -350,6 +403,28 @@ func (s *Store) migrate(ctx context.Context) error {
 
 		if err := s.backfillColumns(ctx, conn); err != nil {
 			return fmt.Errorf("backfilling columns: %w", err)
+		}
+		if current < 5 {
+			// Before v5 the API hydrate path stored summary_* in notes_*.
+			// Copy those values into the new summary columns, but retain the
+			// original notes. Cache sync can merge genuine human notes into an
+			// API-owned row while deliberately preserving row_source and
+			// creation_source, so those markers cannot prove notes_* contains
+			// only generated text. Preserving the ambiguous value avoids a
+			// destructive migration; the next v1.5 API sync will populate the
+			// private-note and summary columns independently.
+			exists, err := tableExists(ctx, conn, "meetings")
+			if err != nil {
+				return err
+			}
+			if exists {
+				if _, err := conn.ExecContext(ctx, `UPDATE meetings
+					SET summary_markdown = COALESCE(NULLIF(summary_markdown, ''), notes_markdown),
+					    summary_plain = COALESCE(NULLIF(summary_plain, ''), notes_plain)
+					WHERE row_source = 'api' AND creation_source = 'granola_api'`); err != nil {
+					return fmt.Errorf("separating api summaries from private notes: %w", err)
+				}
+			}
 		}
 		for _, m := range migrations {
 			if _, err := conn.ExecContext(ctx, m); err != nil {

@@ -155,6 +155,14 @@ func sourceSeconds(segs []granola.TranscriptSegment) (float64, float64) {
 	var mic, sys float64
 	for _, s := range segs {
 		dur := segSeconds(s)
+		switch strings.ToLower(s.Attribution) {
+		case "me":
+			mic += dur
+			continue
+		case "them":
+			sys += dur
+			continue
+		}
 		switch strings.ToLower(s.Source) {
 		case "microphone", "mic":
 			mic += dur

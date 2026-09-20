@@ -49,6 +49,8 @@ const fixtureNoteAlphaDetail = `{
   "space_membership": [],
   "summary_text": "Agreed the quarterly milestones.",
   "summary_markdown": "## Summary\n\nAgreed the quarterly milestones.",
+  "private_notes_text": "Owner follow-up: send the milestone sheet.",
+  "private_notes_markdown": "## Follow-up\n\nSend the milestone sheet.",
   "transcript": [
     {"text": "Kicking off the planning review.", "start_time": "2026-07-01T15:00:00Z", "end_time": "2026-07-01T15:00:20Z", "speaker": {"source": "microphone", "name": "Ada Placeholder"}},
     {"text": "I have the roadmap open now.", "start_time": "2026-07-01T15:00:20Z", "end_time": "2026-07-01T15:01:20Z", "speaker": {"source": "speaker", "name": "Bo Sample", "diarization_label": "SPEAKER_01"}}
@@ -163,7 +165,7 @@ func TestRunAPIHydrate_WritesDomainTablesNotResources(t *testing.T) {
 	assertQueryCount(t, db, `SELECT COUNT(*) FROM folder_memberships WHERE meeting_id='note_alpha'`, 1)
 	// The post-freeze meeting carries its summary.
 	var md string
-	if err := db.QueryRow(`SELECT notes_markdown FROM meetings WHERE id='note_alpha'`).Scan(&md); err != nil {
+	if err := db.QueryRow(`SELECT summary_markdown FROM meetings WHERE id='note_alpha'`).Scan(&md); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(md, "Agreed the quarterly milestones.") {

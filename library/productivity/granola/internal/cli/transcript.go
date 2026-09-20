@@ -28,7 +28,8 @@ func newTranscriptGetCmd(flags *rootFlags) *cobra.Command {
 		Use:   "get <id>",
 		Short: "Get the transcript for a meeting",
 		Long: `Returns the cached transcript when available, falling back to the
-live internal API. --format=json|text|srt. --speaker prefixes lines with
+official paginated public API. Legacy desktop-cache installs can still use the
+internal API when no public API key is configured. --format=json|text|srt. --speaker prefixes lines with
 the source (microphone/system). --since 1:30 trims to segments after the
 M:SS mark.`,
 		Example: `  # Plain transcript text
@@ -53,7 +54,7 @@ M:SS mark.`,
 				return nil
 			}
 			id := args[0]
-			segs, source, err := loadTranscript(cmd.Context(), id, flags.dataSource)
+			segs, source, err := loadTranscriptWithFlags(cmd.Context(), id, flags)
 			if err != nil {
 				return err
 			}
@@ -107,6 +108,67 @@ M:SS mark.`,
 	cmd.Flags().StringVar(&format, "format", "", "Output format: json | text | srt (default: json with --json, else text)")
 	cmd.Flags().StringVar(&since, "since", "", "Trim to segments after M:SS from meeting start")
 	return cmd
+}
+
+// loadTranscriptWithFlags adds the official public API to the store-first
+// transcript reader. Public API keys never pass through the desktop internal
+// API, and the helper follows every transcript page before returning.
+func loadTranscriptWithFlags(ctx context.Context, id string, flags *rootFlags) ([]granola.TranscriptSegment, string, error) {
+	if flags == nil {
+		return loadTranscript(ctx, id, "")
+	}
+	hasReadableCache := false
+	if flags.dataSource != "live" {
+		v, err := openGranolaRead(ctx)
+		if err != nil {
+			if flags.dataSource == "local" {
+				return nil, "", err
+			}
+		} else {
+			if segs, src := v.transcriptWithSource(id); len(segs) > 0 {
+				v.Close()
+				return segs, src, nil
+			}
+			hasReadableCache = v.hasCache()
+			v.Close()
+		}
+		if flags.dataSource == "local" {
+			return nil, "", notFoundErr(fmt.Errorf("no transcript for %s in the local store; run `granola-pp-cli sync-api` (or `granola-pp-cli sync` for a desktop-cache install) first", id))
+		}
+	}
+
+	c, err := flags.newClient()
+	if err != nil {
+		return nil, "", err
+	}
+	// Public API note IDs use the not_ prefix. Legacy desktop/internal-API
+	// meetings use UUIDs, which the public endpoint cannot resolve even when
+	// GRANOLA_API_KEY is configured. Keep those requests on the internal
+	// fallback, including explicit --data-source live requests backed by the
+	// CLI-owned session.
+	if strings.HasPrefix(id, "not_") && c.Config != nil && c.Config.AuthHeader() != "" {
+		segments, err := granola.GetTranscriptAll(c, id, granola.TranscriptPageSizeMax)
+		if err != nil {
+			return nil, "", classifyAPIError(err, flags)
+		}
+		if len(segments) == 0 {
+			return nil, "", notFoundErr(fmt.Errorf("note %s has no transcript", id))
+		}
+		return granola.TranscriptSegments(id, segments), "live", nil
+	}
+
+	if flags.dataSource != "live" && !hasReadableCache && !granola.HasCLISession() {
+		return nil, "", notFoundErr(fmt.Errorf("no transcript for %s in the local store; run `granola-pp-cli sync-api` after setting GRANOLA_API_KEY", id))
+	}
+	ic, err := granola.NewInternalClient()
+	if err != nil {
+		return nil, "", authErr(err)
+	}
+	segs, err := ic.GetDocumentTranscript(id)
+	if err != nil {
+		return nil, "", apiErr(err)
+	}
+	return segs, "live", nil
 }
 
 // loadTranscript returns segments + a string describing the source

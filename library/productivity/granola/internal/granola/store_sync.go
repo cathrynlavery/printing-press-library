@@ -28,6 +28,8 @@ var granolaSchemaSQL = []string{
 		deleted_at TEXT,
 		notes_markdown TEXT,
 		notes_plain TEXT,
+		summary_markdown TEXT,
+		summary_plain TEXT,
 		transcript_available INTEGER NOT NULL DEFAULT 0,
 		recipes_applied TEXT,
 		creation_source TEXT,
@@ -58,6 +60,7 @@ var granolaSchemaSQL = []string{
 		confidence REAL,
 		speaker_name TEXT,
 		diarization_label TEXT,
+		attribution TEXT,
 		row_source TEXT NOT NULL DEFAULT 'cache',
 		PRIMARY KEY (meeting_id, idx)
 	)`,
@@ -201,6 +204,9 @@ var granolaAddedColumns = []struct{ table, column, decl string }{
 	// downstream commands stay source-agnostic.
 	{"transcript_segments", "speaker_name", "TEXT"},
 	{"transcript_segments", "diarization_label", "TEXT"},
+	{"transcript_segments", "attribution", "TEXT"},
+	{"meetings", "summary_markdown", "TEXT"},
+	{"meetings", "summary_plain", "TEXT"},
 }
 
 // EnsureSchema runs the additive Granola-specific migrations. Idempotent.
@@ -928,9 +934,10 @@ func upsertAPINote(ctx context.Context, tx *sql.Tx, n *APINote, res *APISyncResu
 		title = n.CalendarEvent.EventTitle
 	}
 
-	// summary_markdown / summary_text land in notes_markdown / notes_plain:
-	// those are the columns the meeting read path (show, export, memo,
-	// notes-show, the cache backfill) already consumes as the meeting body.
+	// Granola v1.5 distinguishes owner-written private notes from generated
+	// summaries. Keep those streams separate: notes_* is human-authored,
+	// summary_* is generated. A null private-notes field means the caller is
+	// not the owner and must never erase cache-owned notes.
 	//
 	// ON CONFLICT DO UPDATE rather than INSERT OR REPLACE for two reasons:
 	// REPLACE reallocates the rowid, which desynchronises the external-content
@@ -940,12 +947,22 @@ func upsertAPINote(ctx context.Context, tx *sql.Tx, n *APINote, res *APISyncResu
 	// source never overwrites a populated one from the other. row_source is
 	// intentionally left alone on conflict: whichever path created the row
 	// keeps ownership, so neither path's scoped DELETE can reach the other's.
+	privateMarkdown, privatePlain := "", ""
+	privateMarkdownProvided, privatePlainProvided := 0, 0
+	if n.PrivateNotesMarkdown != nil {
+		privateMarkdown = *n.PrivateNotesMarkdown
+		privateMarkdownProvided = 1
+	}
+	if n.PrivateNotesText != nil {
+		privatePlain = *n.PrivateNotesText
+		privatePlainProvided = 1
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO meetings(
 		id, title, created_at, updated_at, started_at, ended_at, workspace_id,
-		calendar_event_id, deleted_at, notes_markdown, notes_plain,
+		calendar_event_id, deleted_at, notes_markdown, notes_plain, summary_markdown, summary_plain,
 		transcript_available, recipes_applied, creation_source, valid_meeting,
 		row_source
-	) VALUES (?,?,?,?,?,?,'',?,'',?,?,?,'[]','granola_api',1,?)
+	) VALUES (?,?,?,?,?,?,'',?,'',?,?,?,?,?,'[]','granola_api',1,?)
 	ON CONFLICT(id) DO UPDATE SET
 		title                = COALESCE(NULLIF(excluded.title,''), meetings.title),
 		created_at           = COALESCE(NULLIF(excluded.created_at,''), meetings.created_at),
@@ -953,11 +970,22 @@ func upsertAPINote(ctx context.Context, tx *sql.Tx, n *APINote, res *APISyncResu
 		started_at           = COALESCE(NULLIF(excluded.started_at,''), meetings.started_at),
 		ended_at             = COALESCE(NULLIF(excluded.ended_at,''), meetings.ended_at),
 		calendar_event_id    = COALESCE(NULLIF(excluded.calendar_event_id,''), meetings.calendar_event_id),
-		notes_markdown       = COALESCE(NULLIF(excluded.notes_markdown,''), meetings.notes_markdown),
-		notes_plain          = COALESCE(NULLIF(excluded.notes_plain,''), meetings.notes_plain),
+		notes_markdown       = CASE
+			WHEN ? = 0 THEN meetings.notes_markdown
+			WHEN meetings.row_source = 'api' THEN excluded.notes_markdown
+			ELSE COALESCE(NULLIF(excluded.notes_markdown,''), meetings.notes_markdown)
+		END,
+		notes_plain          = CASE
+			WHEN ? = 0 THEN meetings.notes_plain
+			WHEN meetings.row_source = 'api' THEN excluded.notes_plain
+			ELSE COALESCE(NULLIF(excluded.notes_plain,''), meetings.notes_plain)
+		END,
+		summary_markdown     = COALESCE(NULLIF(excluded.summary_markdown,''), meetings.summary_markdown),
+		summary_plain        = COALESCE(NULLIF(excluded.summary_plain,''), meetings.summary_plain),
 		transcript_available = MAX(meetings.transcript_available, excluded.transcript_available)`,
 		n.ID, title, n.CreatedAt, n.UpdatedAt, startedAt, endedAt,
-		calEventID, n.SummaryMarkdown, n.SummaryText, transcriptAvail, RowSourceAPI,
+		calEventID, privateMarkdown, privatePlain, n.SummaryMarkdown, n.SummaryText, transcriptAvail, RowSourceAPI,
+		privateMarkdownProvided, privatePlainProvided,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert api meeting %s: %w", n.ID, err)
@@ -1107,7 +1135,7 @@ func upsertAPITranscript(ctx context.Context, tx *sql.Tx, n *APINote, res *APISy
 		startMs := bad.parse(seg.StartTime, n.ID, i, "start_time")
 		endMs := bad.parse(seg.EndTime, n.ID, i, "end_time")
 		source := ""
-		var speakerName, label any
+		var speakerName, label, attribution any
 		if seg.Speaker != nil {
 			source = NormalizeSpeakerSource(seg.Speaker.Source)
 			if nm := seg.Speaker.ResolvedName(); nm != "" {
@@ -1116,15 +1144,18 @@ func upsertAPITranscript(ctx context.Context, tx *sql.Tx, n *APINote, res *APISy
 			if lb := seg.Speaker.ResolvedLabel(); lb != "" {
 				label = lb
 			}
+			if seg.Speaker.Attribution != "" {
+				attribution = seg.Speaker.Attribution
+			}
 		}
 		// confidence is 0: the public API does not expose a per-segment
 		// confidence score. Writing a fabricated 1.0 would make
 		// talktime's confidence_avg lie about API-sourced meetings.
 		_, err := tx.ExecContext(ctx, `INSERT INTO transcript_segments(
 			meeting_id, idx, source, text, start_ts_ms, end_ts_ms, confidence,
-			speaker_name, diarization_label, row_source
-		) VALUES (?,?,?,?,?,?,0,?,?,?)`,
-			n.ID, i, source, seg.Text, startMs, endMs, speakerName, label, RowSourceAPI)
+			speaker_name, diarization_label, attribution, row_source
+		) VALUES (?,?,?,?,?,?,0,?,?,?,?)`,
+			n.ID, i, source, seg.Text, startMs, endMs, speakerName, label, attribution, RowSourceAPI)
 		if err != nil {
 			return fmt.Errorf("upsert api segment %s/%d: %w", n.ID, i, err)
 		}

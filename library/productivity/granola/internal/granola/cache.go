@@ -83,6 +83,8 @@ type Document struct {
 	Notes                 json.RawMessage      `json:"notes,omitempty"`
 	NotesPlain            string               `json:"notes_plain,omitempty"`
 	NotesMarkdown         string               `json:"notes_markdown,omitempty"`
+	SummaryPlain          string               `json:"summary_plain,omitempty"`
+	SummaryMarkdown       string               `json:"summary_markdown,omitempty"`
 	Transcribe            bool                 `json:"transcribe,omitempty"`
 	Type                  string               `json:"type,omitempty"`
 	ValidMeeting          bool                 `json:"valid_meeting,omitempty"`
@@ -124,6 +126,9 @@ type TranscriptSegment struct {
 	StartTimestamp    string  `json:"start_timestamp,omitempty"` // ISO-8601
 	EndTimestamp      string  `json:"end_timestamp,omitempty"`
 	Confidence        float64 `json:"confidence,omitempty"`
+	Attribution       string  `json:"attribution,omitempty"` // me | them
+	SpeakerName       string  `json:"speaker_name,omitempty"`
+	DiarizationLabel  string  `json:"diarization_label,omitempty"`
 	IsFinal           bool    `json:"is_final,omitempty"`
 	TranscriberUserID *string `json:"transcriber_user_id,omitempty"`
 }

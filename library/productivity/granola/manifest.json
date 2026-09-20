@@ -15,7 +15,9 @@
       "command": "${__dirname}/bin/granola-pp-mcp",
       "args": [],
       "env": {
-        "GRANOLA_API_KEY": "${user_config.granola_api_key}"
+        "GRANOLA_API_KEY": "${user_config.granola_api_key}",
+        "GRANOLA_AUDIT_API_KEY": "${user_config.granola_audit_api_key}",
+        "GRANOLA_WEBHOOK_SECRET": "${user_config.granola_webhook_secret}"
       }
     }
   },
@@ -24,6 +26,18 @@
       "type": "string",
       "title": "GRANOLA_API_KEY",
       "description": "Granola public API key, created in Granola desktop under Settings → Connectors → API keys. Creating one requires a Business or Enterprise Granola workspace; personal and free workspaces cannot issue keys. Needed to fetch new meeting data; reading data already synced into the local store needs no key.",
+      "sensitive": true
+    },
+    "granola_audit_api_key": {
+      "type": "string",
+      "title": "GRANOLA_AUDIT_API_KEY",
+      "description": "Dedicated Granola audit-log API key. Audit keys are separate from regular API keys.",
+      "sensitive": true
+    },
+    "granola_webhook_secret": {
+      "type": "string",
+      "title": "GRANOLA_WEBHOOK_SECRET",
+      "description": "Webhook signing secret used for offline delivery verification.",
       "sensitive": true
     }
   },

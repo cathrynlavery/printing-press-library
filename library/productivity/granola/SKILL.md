@@ -1,6 +1,6 @@
 ---
 name: pp-granola
-description: "Every Granola feature — plus offline SQLite cross-meeting search, attendee timelines, and a MEMO pipeline runner... Trigger phrases: `memo run for today's meetings`, `what's in granola but not yet memo'd`, `every meeting we had with trevin`, `did i run the discovery recipe`, `talk time in last week's meetings`, `calendar overlay missed meetings`, `find duplicates in meeting transcripts`, `extract granola meeting`, `use granola`, `run granola`."
+description: "Granola notes, transcripts, audit events, and webhooks — plus offline SQLite cross-meeting search, attendee timelines, and a MEMO pipeline runner. Trigger phrases: `memo run for today's meetings`, `what's in granola but not yet memo'd`, `every meeting we had with trevin`, `verify granola webhook`, `list granola audit events`, `talk time in last week's meetings`, `extract granola meeting`, `use granola`, `run granola`."
 author: "Damien Stevens"
 license: "Apache-2.0"
 argument-hint: "<command> [args] | install cli|mcp"
@@ -80,7 +80,7 @@ Transcripts backfill incrementally. There is no bulk transcript endpoint, so `sy
 
 Both read straight from the API on each call, so they need no store rows. The tradeoff is that `panel get` is the one read command with no local fallback at all: if the session lapses it fails hard where everything else degrades to stored data.
 
-**With a `GRANOLA_API_KEY`, hydrated by `sync-api`:** everything above plus note summaries (`summary_markdown`).
+**With a `GRANOLA_API_KEY`, hydrated by `sync-api`:** public-API notes, generated summaries, owner-only private notes when returned, folder membership, speaker attribution, and full transcripts. Long transcripts are retrieved through the paginated transcript endpoint when note detail returns HTTP 413.
 
 **Frozen but still readable — AI chat threads (`chat list`, `chat get`):**
 
@@ -100,7 +100,7 @@ Reach for granola-pp-cli when you need to answer cross-meeting questions Granola
 
 ## When Not to Use This CLI
 
-Do not activate this CLI for requests that require creating, updating, deleting, publishing, commenting, upvoting, inviting, ordering, sending messages, booking, purchasing, or changing remote state. This printed CLI exposes read-only commands for inspection, export, sync, and analysis.
+Do not change remote state unless the user explicitly asks. The narrow remote mutation surface is `webhooks create / update / delete` and `meetings delete / restore`; webhook deletion requires `--yes`. Inspection, export, sync, audit reads, and offline webhook verification are safe read paths.
 
 ## Platform Notes
 
@@ -249,6 +249,7 @@ Quick orientation by group:
 | **Cross-meeting analytics** | `attendee timeline`, `attendee brief`, `folder stream`, `recipes coverage`, `talktime`, `calendar overlay`, `stats frequency`, `stats duration`, `stats attendees`, `stats calendar`, `collect`, `duplicates scan`, `chat list`, `chat get` | Queries no per-meeting tool can answer |
 | **Folders / recipes / workspaces** | `folders` (public-API), `folder list`, `folder stream`, `recipes list`, `recipes describe`, `recipes coverage`, `workspaces list` | Granola organizational entities |
 | **Public-API mirrors** | `notes list`, `notes get`, `folders` | Typed Bearer-key endpoints |
+| **Public-API administration** | `audit list`, `webhooks list`, `webhooks create`, `webhooks update`, `webhooks delete`, `webhooks verify` | Audit reads with a dedicated key; webhook lifecycle management; offline delivery verification |
 | **Sync / system** | `sync`, `sync-api`, `doctor`, `auth setup`, `auth status`, `auth set-token`, `auth logout`, `which`, `agent-context`, `version`, `import` | Local store hydration (`sync-api` is the working path on current installs), auth, capability discovery, batch import |
 | **GUI bridge** | `warm` (macOS only) | Drives Granola desktop app via AppleScript |
 
@@ -321,6 +322,10 @@ Prefer the env var over persisting the key into `~/.config/granola-pp-cli/config
 
 The base URL is `https://public-api.granola.ai`. The list endpoints cap `page_size` at 30 and reject any temporal filter that is not a UTC `Z` timestamp; the CLI handles both, but keep it in mind if you script against the API directly.
 
+Audit logs require a separate `GRANOLA_AUDIT_API_KEY`; do not substitute the regular key. Webhook creation returns `signing_secret` once. Store it as `GRANOLA_WEBHOOK_SECRET`, then verify captured raw bodies with `webhooks verify` before parsing or processing them.
+
+Use `audit list --action <prefix> --occurred-after <date> --all` for a serial full-window read. Webhook receivers must deduplicate on `event_id`: Granola retries failures for four days with the same ID. Paused endpoints do not receive or later replay events that occur while paused.
+
 ### 2. Hydrate once
 
 Run `granola-pp-cli sync-api`. It pages the notes list, then fetches each note's detail with its transcript and writes meetings, attendees, calendar events, summaries, folder membership, and transcript segments into the local store — the tables every read command queries. On repeat runs narrow the window with `--since 7d`.
@@ -366,9 +371,9 @@ Add `--agent` to any command. Expands to: `--json --compact --no-input --no-colo
   granola-pp-cli folders --agent --select id,name,status
   ```
 - **Previewable** — `--dry-run` shows the request without sending
-- **Offline-friendly** — once hydrated by `sync` or `sync-api`, every read command serves from the local SQLite store with no network call and no API key
+- **Offline-friendly data reads** — once hydrated by `sync` or `sync-api`, meeting and analytics reads serve from SQLite; audit and webhook management are live-only
 - **Non-interactive** — never prompts, every input is a flag
-- **Mostly read-only** — `meetings delete`, `meetings restore`, `import`, and `warm --launch` are the only commands that mutate state; every other command inspects, exports, syncs, or analyzes
+- **Mostly read-only** — `webhooks create / update / delete`, `meetings delete / restore`, `import`, and `warm --launch` mutate state; deletion requires explicit confirmation where supported
 
 ### Response envelope
 
@@ -420,7 +425,7 @@ granola-pp-cli profile save fast --no-refresh
 granola-pp-cli --profile fast meetings list
 ```
 
-**Skipped commands.** Auto-refresh never fires for `sync`, `sync-api`, `auth*`, `doctor`, `help`, `version`, `completion`, `agent-context`, `profile*`, `feedback*`, or `which`. These either do not read data or cannot operate before auth is established. `agent-context --json` exposes the full skip list under `auto_refresh.skip_list` for introspecting agents.
+**Skipped commands.** Auto-refresh never fires for `sync`, `sync-api`, `auth*`, `doctor`, `help`, `version`, `completion`, `agent-context`, `profile*`, `feedback*`, `which`, `audit`, or `webhooks`. These either do not read meeting data or cannot operate before auth is established. `agent-context --json` exposes the full skip list under `auto_refresh.skip_list` for introspecting agents.
 
 ## Agent Feedback
 

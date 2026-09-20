@@ -15,6 +15,7 @@ func newNotesListCmd(flags *rootFlags) *cobra.Command {
 	var flagCreatedBefore string
 	var flagCreatedAfter string
 	var flagUpdatedAfter string
+	var flagFolderID string
 	var flagCursor string
 	var flagPageSize int
 	var flagAll bool
@@ -35,9 +36,10 @@ func newNotesListCmd(flags *rootFlags) *cobra.Command {
 				"created_before": fmt.Sprintf("%v", flagCreatedBefore),
 				"created_after":  fmt.Sprintf("%v", flagCreatedAfter),
 				"updated_after":  fmt.Sprintf("%v", flagUpdatedAfter),
+				"folder_id":      fmt.Sprintf("%v", flagFolderID),
 				"cursor":         fmt.Sprintf("%v", flagCursor),
 				"page_size":      fmt.Sprintf("%v", flagPageSize),
-			}, nil, flagAll, "cursor", "", "hasMore")
+			}, nil, flagAll, "cursor", "cursor", "hasMore")
 			if err != nil {
 				return classifyAPIError(err, flags)
 			}
@@ -84,6 +86,7 @@ func newNotesListCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&flagCreatedBefore, "created-before", "", "Created before")
 	cmd.Flags().StringVar(&flagCreatedAfter, "created-after", "", "Created after")
 	cmd.Flags().StringVar(&flagUpdatedAfter, "updated-after", "", "Updated after")
+	cmd.Flags().StringVar(&flagFolderID, "folder-id", "", "Only notes in this folder")
 	cmd.Flags().StringVar(&flagCursor, "cursor", "", "Cursor")
 	cmd.Flags().IntVar(&flagPageSize, "page-size", 10, "Page size")
 	cmd.Flags().BoolVar(&flagAll, "all", false, "Fetch all pages")

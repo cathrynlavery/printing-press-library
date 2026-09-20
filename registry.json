@@ -139,9 +139,9 @@
       "path": "library/auth/1password",
       "release": {
         "cli_name": "1password-pp-cli",
-        "version": "2026.9.1",
-        "released_at": "2026-09-11T09:22:21Z",
-        "source_commit": "81f5764eda401077520268afe74913c0f21f5b7e"
+        "version": "2026.9.2",
+        "released_at": "2026-09-20T17:08:34Z",
+        "source_commit": "859d6f6ba4b6e525f356386da2f6657fcea7ebde"
       },
       "printer": "cathrynlavery",
       "printer_name": "Cathryn Lavery",
@@ -4693,9 +4693,9 @@
       "path": "library/health/clinical-trials",
       "release": {
         "cli_name": "clinical-trials-pp-cli",
-        "version": "2026.9.13",
-        "released_at": "2026-09-19T09:14:37Z",
-        "source_commit": "28227338a2aaf91e6b7b51929ea0f9e1b6928da0"
+        "version": "2026.9.14",
+        "released_at": "2026-09-20T09:11:29Z",
+        "source_commit": "f84e1beb3ea79e637afb7cc6d259c9b4e4e51a35"
       },
       "printer": "laci141",
       "printer_name": "laci141",
@@ -11308,7 +11308,9 @@
         "public_tool_count": 0,
         "auth_type": "bearer_token",
         "env_vars": [
-          "GRANOLA_API_KEY"
+          "GRANOLA_API_KEY",
+          "GRANOLA_AUDIT_API_KEY",
+          "GRANOLA_WEBHOOK_SECRET"
         ],
         "mcp_ready": "full",
         "spec_format": "openapi3"
@@ -11443,9 +11445,9 @@
       "path": "library/other/greatclips",
       "release": {
         "cli_name": "greatclips-pp-cli",
-        "version": "2026.9.1",
-        "released_at": "2026-09-11T09:22:21Z",
-        "source_commit": "81f5764eda401077520268afe74913c0f21f5b7e"
+        "version": "2026.9.2",
+        "released_at": "2026-09-19T15:59:49Z",
+        "source_commit": "047a77b5a56a1b1e65189f16b1a2542d62b42628"
       },
       "printer": "mvanhorn",
       "printer_name": "Matt Van Horn",
@@ -12391,9 +12393,9 @@
       "path": "library/productivity/human-goat",
       "release": {
         "cli_name": "human-goat-pp-cli",
-        "version": "2026.9.1",
-        "released_at": "2026-09-11T09:22:21Z",
-        "source_commit": "81f5764eda401077520268afe74913c0f21f5b7e"
+        "version": "2026.9.2",
+        "released_at": "2026-09-19T15:59:49Z",
+        "source_commit": "047a77b5a56a1b1e65189f16b1a2542d62b42628"
       },
       "printer": "mvanhorn",
       "printer_name": "Matt Van Horn",
@@ -17619,9 +17621,9 @@
       "path": "library/other/openbdap",
       "release": {
         "cli_name": "openbdap-pp-cli",
-        "version": "2026.9.1",
-        "released_at": "2026-09-18T09:12:36Z",
-        "source_commit": "c64f83a6caceeb8253ccbb80fb3f1680dd805a31"
+        "version": "2026.9.2",
+        "released_at": "2026-09-20T09:12:34Z",
+        "source_commit": "8d24ec617e6bbfdf98832cb2804a3b067c99a176"
       },
       "printer": "aborruso",
       "printer_name": "aborruso",
@@ -19027,9 +19029,9 @@
       "path": "library/health/peloton",
       "release": {
         "cli_name": "peloton-pp-cli",
-        "version": "2026.9.9",
-        "released_at": "2026-09-13T09:15:33Z",
-        "source_commit": "708f5c5ee64594b845b4378516c112ae6a6a16cc"
+        "version": "2026.9.12",
+        "released_at": "2026-09-20T09:23:54Z",
+        "source_commit": "4dc07dda8d4c69f190438d6815e0f462707320d6"
       },
       "printer": "itsmefelix-",
       "printer_name": "Felix Banuchi",
@@ -26250,9 +26252,9 @@
       "path": "library/developer-tools/thelancet",
       "release": {
         "cli_name": "thelancet-pp-cli",
-        "version": "2026.9.2",
-        "released_at": "2026-09-11T09:22:21Z",
-        "source_commit": "81f5764eda401077520268afe74913c0f21f5b7e"
+        "version": "2026.9.3",
+        "released_at": "2026-09-20T09:12:34Z",
+        "source_commit": "f7a1036f609cc349700557b9bbeacf0ec4cc662d"
       },
       "printer": "laci141",
       "printer_name": "laci141",

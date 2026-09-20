@@ -55,6 +55,8 @@ var noRefreshCommands = map[string]struct{}{
 	"feedback":      {},
 	"which":         {},
 	"db":            {},
+	"audit":         {},
+	"webhooks":      {},
 }
 
 // refreshSurface labels which auth path a refreshResult came from so

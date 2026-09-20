@@ -57,17 +57,26 @@ func buildArtifacts(ctx context.Context, id string, allowLive bool, panelTemplat
 		a.NotesHuman = strings.TrimSpace(d.NotesPlain)
 	}
 
-	// Stream 2: AI panel(s).
+	// Stream 2: stored public-API summary, overridden by a live panel when
+	// available. Summaries are deliberately not treated as human notes.
+	a.PanelSummary = strings.TrimSpace(d.SummaryMarkdown)
+	if a.PanelSummary == "" {
+		a.PanelSummary = strings.TrimSpace(d.SummaryPlain)
+	}
 	if allowLive {
 		ic, err := granola.NewInternalClient()
 		if err == nil {
 			panels, perr := ic.GetDocumentPanels(id)
 			if perr == nil {
 				a.PanelMap = panels
+				var liveSummary string
 				if panelTemplate != "" {
-					a.PanelSummary = panels[panelTemplate]
+					liveSummary = panels[panelTemplate]
 				} else {
-					a.PanelSummary = bestPanel(panels)
+					liveSummary = bestPanel(panels)
+				}
+				if strings.TrimSpace(liveSummary) != "" {
+					a.PanelSummary = liveSummary
 				}
 			}
 		}

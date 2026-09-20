@@ -35,7 +35,9 @@
   "api_version": "1.0.0",
   "auth_type": "bearer_token",
   "auth_env_vars": [
-    "GRANOLA_API_KEY"
+    "GRANOLA_API_KEY",
+    "GRANOLA_AUDIT_API_KEY",
+    "GRANOLA_WEBHOOK_SECRET"
   ],
   "auth_env_var_specs": [
     {
@@ -44,6 +46,20 @@
       "required": false,
       "sensitive": true,
       "description": "Granola public API key, created in Granola desktop under Settings → Connectors → API keys. Creating one requires a Business or Enterprise Granola workspace; personal and free workspaces cannot issue keys. Needed to fetch new meeting data via `sync-api`, because current Granola desktop builds keep the local cache encryption key in an entitlement-gated macOS keychain group that no third-party binary can read. Reading data already synced into the local store needs no key at all."
+    },
+    {
+      "name": "GRANOLA_AUDIT_API_KEY",
+      "kind": "per_call",
+      "required": false,
+      "sensitive": true,
+      "description": "Dedicated Granola audit-log API key. Audit keys are separate from regular API keys."
+    },
+    {
+      "name": "GRANOLA_WEBHOOK_SECRET",
+      "kind": "per_call",
+      "required": false,
+      "sensitive": true,
+      "description": "One-time webhook signing secret used only for offline delivery verification."
     }
   ],
   "novel_features": [

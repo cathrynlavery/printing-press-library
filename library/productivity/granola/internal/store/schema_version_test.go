@@ -355,6 +355,51 @@ func TestMigrate_RejectsNewerDBImmediately(t *testing.T) {
 	}
 }
 
+func TestMigrateV5SeparatesAPISummaryFromPrivateNotes(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE meetings (
+		id TEXT PRIMARY KEY,
+		notes_markdown TEXT,
+		notes_plain TEXT,
+		creation_source TEXT,
+		row_source TEXT NOT NULL DEFAULT 'cache'
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO meetings(id, notes_markdown, notes_plain, creation_source, row_source)
+		VALUES ('api_note', '## Generated summary', 'Generated summary', 'granola_api', 'api'),
+		       ('cache_note', '## Human note', 'Human note', 'cache', 'cache')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`PRAGMA user_version = 4`); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	var notes, summary string
+	if err := s.DB().QueryRow(`SELECT notes_markdown, summary_markdown FROM meetings WHERE id='api_note'`).Scan(&notes, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if notes != "" || summary != "## Generated summary" {
+		t.Fatalf("api row notes=%q summary=%q", notes, summary)
+	}
+	if err := s.DB().QueryRow(`SELECT notes_markdown, COALESCE(summary_markdown, '') FROM meetings WHERE id='cache_note'`).Scan(&notes, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if notes != "## Human note" || summary != "" {
+		t.Fatalf("cache row notes=%q summary=%q", notes, summary)
+	}
+}
+
 // TestSchemaVersion_ReopenIsIdempotent verifies that opening an already
 // correctly-stamped DB is a no-op — the second open reads the version
 // and the migrations are all idempotent (CREATE TABLE IF NOT EXISTS).

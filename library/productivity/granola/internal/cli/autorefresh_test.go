@@ -22,6 +22,7 @@ func TestShouldSkipAutoRefresh_TopLevelSkips(t *testing.T) {
 		"sync", "sync-api", "auth", "doctor",
 		"help", "version", "completion", "agent-context",
 		"profile", "feedback", "which", "db",
+		"audit", "webhooks",
 	}
 	for _, name := range skips {
 		t.Run(name, func(t *testing.T) {

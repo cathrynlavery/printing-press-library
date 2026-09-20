@@ -48,17 +48,18 @@ func RegisterTools(s *server.MCPServer) {
 	)
 	s.AddTool(
 		mcplib.NewTool("notes_list",
-			mcplib.WithDescription("List notes. Optional: created_before, created_after, updated_after (plus 2 more). Returns the ListNotesOutput."),
+			mcplib.WithDescription("List notes. Optional: created_before, created_after, updated_after, folder_id, cursor, page_size. Returns the ListNotesOutput."),
 			mcplib.WithString("created_before", mcplib.Description("Created before")),
 			mcplib.WithString("created_after", mcplib.Description("Created after")),
 			mcplib.WithString("updated_after", mcplib.Description("Updated after")),
+			mcplib.WithString("folder_id", mcplib.Description("Only notes in this folder")),
 			mcplib.WithString("cursor", mcplib.Description("Cursor")),
 			mcplib.WithString("page_size", mcplib.Description("Page size")),
 			mcplib.WithReadOnlyHintAnnotation(true),
 			mcplib.WithDestructiveHintAnnotation(false),
 			mcplib.WithOpenWorldHintAnnotation(true),
 		),
-		makeAPIHandler("GET", "/v1/notes", []mcpParamBinding{{PublicName: "created_before", WireName: "created_before", Location: "query"}, {PublicName: "created_after", WireName: "created_after", Location: "query"}, {PublicName: "updated_after", WireName: "updated_after", Location: "query"}, {PublicName: "cursor", WireName: "cursor", Location: "query"}, {PublicName: "page_size", WireName: "page_size", Location: "query"}}, []string{}),
+		makeAPIHandler("GET", "/v1/notes", []mcpParamBinding{{PublicName: "created_before", WireName: "created_before", Location: "query"}, {PublicName: "created_after", WireName: "created_after", Location: "query"}, {PublicName: "updated_after", WireName: "updated_after", Location: "query"}, {PublicName: "folder_id", WireName: "folder_id", Location: "query"}, {PublicName: "cursor", WireName: "cursor", Location: "query"}, {PublicName: "page_size", WireName: "page_size", Location: "query"}}, []string{}),
 	)
 	// SQL tool — ad-hoc analysis on synced data without API calls
 	s.AddTool(
@@ -349,7 +350,7 @@ func handleSQL(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToo
 func handleContext(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	ctx := map[string]any{
 		"api":         "granola",
-		"description": "Every Granola feature — plus offline SQLite cross-meeting search, attendee timelines, and a MEMO pipeline runner...",
+		"description": "Granola notes, transcripts, audit events, and webhooks with offline cross-meeting workflows.",
 		"archetype":   "generic",
 		"tool_count":  3,
 		// tool_surface tells agents which surface a capability lives on.
@@ -363,6 +364,20 @@ func handleContext(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToo
 					"required":    false,
 					"sensitive":   true,
 					"description": "Set to your API credential.",
+				},
+				{
+					"name":        "GRANOLA_AUDIT_API_KEY",
+					"kind":        "per_call",
+					"required":    false,
+					"sensitive":   true,
+					"description": "Dedicated key for audit log reads.",
+				},
+				{
+					"name":        "GRANOLA_WEBHOOK_SECRET",
+					"kind":        "per_call",
+					"required":    false,
+					"sensitive":   true,
+					"description": "Signing secret used only for offline webhook verification.",
 				},
 			},
 		},

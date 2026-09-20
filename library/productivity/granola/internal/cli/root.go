@@ -85,8 +85,8 @@ func Execute() error {
 func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "granola-pp-cli",
-		Short: `Granola CLI — Every Granola feature — plus offline SQLite cross-meeting search, attendee timelines, and a MEMO pipeline runner no oth…`,
-		Long: `Granola CLI — Every Granola feature — plus offline SQLite cross-meeting search, attendee timelines, and a MEMO pipeline runner no oth…
+		Short: `Granola notes, transcripts, audit events, and webhooks with offline cross-meeting workflows`,
+		Long: `Granola notes, transcripts, audit events, and webhooks with offline SQLite cross-meeting workflows.
 
 Highlights (not in the official API docs):
   • memo run   Run the preflight → extract pipeline on one meeting or every new meeting since a timestamp, emitting the MEMO three-file artifact and an ndjson run-state ledger.
@@ -217,6 +217,8 @@ See README.md or the bundled SKILL.md for recipes.`,
 	rootCmd.AddCommand(newWorkflowCmd(flags))
 	rootCmd.AddCommand(newAPICmd(flags))
 	rootCmd.AddCommand(newFoldersPromotedCmd(flags))
+	rootCmd.AddCommand(newAuditCmd(flags))
+	rootCmd.AddCommand(newWebhooksCmd(flags))
 	rootCmd.AddCommand(newVersionCliCmd())
 
 	// Granola-specific commands.

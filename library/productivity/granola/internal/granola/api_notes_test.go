@@ -58,9 +58,11 @@ const noteDetailWithTranscriptJSON = `{
   "space_membership": [{"id": "space_team", "name": "Team space"}],
   "summary_text": "Agreed the quarterly milestones.",
   "summary_markdown": "## Summary\n\nAgreed the quarterly milestones.",
+  "private_notes_text": "Owner follow-up: send the milestone sheet.",
+  "private_notes_markdown": "## Follow-up\n\nSend the milestone sheet.",
   "transcript": [
-    {"text": "Kicking off the planning review.", "start_time": "2026-07-01T15:00:00Z", "end_time": "2026-07-01T15:00:30Z", "speaker": {"source": "microphone", "name": "Ada Placeholder"}},
-    {"text": "Sounds good, I have the roadmap open.", "start_time": "2026-07-01T15:00:30Z", "end_time": "2026-07-01T15:01:30Z", "speaker": {"source": "speaker", "name": "Bo Sample", "diarization_label": "SPEAKER_01"}},
+    {"text": "Kicking off the planning review.", "start_time": "2026-07-01T15:00:00Z", "end_time": "2026-07-01T15:00:30Z", "speaker": {"source": "microphone", "attribution": "me", "name": "Ada Placeholder"}},
+    {"text": "Sounds good, I have the roadmap open.", "start_time": "2026-07-01T15:00:30Z", "end_time": "2026-07-01T15:01:30Z", "speaker": {"source": "speaker", "attribution": "them", "name": "Bo Sample", "diarization_label": "SPEAKER_01"}},
     {"text": "Let us start with milestone one.", "start_time": "2026-07-01T15:01:30Z", "end_time": "2026-07-01T15:02:00Z", "speaker": {"source": "microphone"}}
   ]
 }`
@@ -110,6 +112,79 @@ func decodeNote(t *testing.T, raw string) APINote {
 		t.Fatalf("decoding fixture: %v", err)
 	}
 	return n
+}
+
+func TestGetTranscriptAllFollowsCursors(t *testing.T) {
+	var cursors []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/notes/note_alpha/transcript" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		cursors = append(cursors, r.URL.Query().Get("cursor"))
+		if r.URL.Query().Get("cursor") == "next_1" {
+			_, _ = w.Write([]byte(`{"transcript":[{"text":"second","speaker":{"source":"speaker","attribution":"them"}}],"hasMore":false,"cursor":null}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"transcript":[{"text":"first","speaker":{"source":"microphone","attribution":"me"}}],"hasMore":true,"cursor":"next_1"}`))
+	}))
+	defer srv.Close()
+
+	segments, err := GetTranscriptAll(testClient(t, srv.URL), "note_alpha", 100)
+	if err != nil {
+		t.Fatalf("GetTranscriptAll: %v", err)
+	}
+	if len(segments) != 2 || segments[0].Text != "first" || segments[1].Text != "second" {
+		t.Fatalf("segments = %+v", segments)
+	}
+	if got := strings.Join(cursors, ","); got != ",next_1" {
+		t.Fatalf("cursors = %q", got)
+	}
+	converted := TranscriptSegments("note_alpha", segments)
+	if converted[0].Source != "microphone" || converted[0].Attribution != "me" || converted[1].Source != "system" {
+		t.Fatalf("converted speaker identity = %+v", converted)
+	}
+}
+
+func TestGetNoteFallsBackToPagedTranscriptAfter413(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.RequestURI())
+		switch {
+		case r.URL.Path == "/v1/notes/note_large" && r.URL.Query().Get("include") == "transcript":
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_, _ = w.Write([]byte(`{"error":"use the transcript endpoint"}`))
+		case r.URL.Path == "/v1/notes/note_large":
+			_, _ = w.Write([]byte(`{"id":"note_large","title":"Long meeting"}`))
+		case r.URL.Path == "/v1/notes/note_large/transcript":
+			_, _ = w.Write([]byte(`{"transcript":[{"text":"paged"}],"hasMore":false,"cursor":null}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	note, err := GetNote(testClient(t, srv.URL), "note_large", true)
+	if err != nil {
+		t.Fatalf("GetNote: %v", err)
+	}
+	if len(note.Transcript) != 1 || note.Transcript[0].Text != "paged" {
+		t.Fatalf("transcript = %+v", note.Transcript)
+	}
+	if len(paths) != 3 {
+		t.Fatalf("requests = %v", paths)
+	}
+}
+
+func TestGetTranscriptAllRejectsRepeatedCursor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"transcript":[],"hasMore":true,"cursor":"stuck"}`))
+	}))
+	defer srv.Close()
+
+	_, err := GetTranscriptAll(testClient(t, srv.URL), "note_alpha", 100)
+	if err == nil || !strings.Contains(err.Error(), "repeated cursor") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -440,22 +515,23 @@ func TestSyncFromAPI_HydratesSummaryAndCalendarEvent(t *testing.T) {
 		t.Fatalf("SyncFromAPI: %v", err)
 	}
 
-	var title, md, plain, evtID, startedAt, endedAt, rowSource string
+	var title, notesMD, notesPlain, summaryMD, summaryPlain, evtID, startedAt, endedAt, rowSource string
 	err := db.QueryRowContext(ctx,
-		`SELECT title, notes_markdown, notes_plain, calendar_event_id, started_at, ended_at, row_source
+		`SELECT title, notes_markdown, notes_plain, summary_markdown, summary_plain,
+		        calendar_event_id, started_at, ended_at, row_source
 		 FROM meetings WHERE id='note_alpha'`).
-		Scan(&title, &md, &plain, &evtID, &startedAt, &endedAt, &rowSource)
+		Scan(&title, &notesMD, &notesPlain, &summaryMD, &summaryPlain, &evtID, &startedAt, &endedAt, &rowSource)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if title != "Quarterly planning sync" {
 		t.Errorf("title = %q", title)
 	}
-	if md != "## Summary\n\nAgreed the quarterly milestones." {
-		t.Errorf("summary_markdown did not land on the meeting summary column: %q", md)
+	if notesMD != "## Follow-up\n\nSend the milestone sheet." || notesPlain != "Owner follow-up: send the milestone sheet." {
+		t.Errorf("private notes = %q / %q", notesMD, notesPlain)
 	}
-	if plain != "Agreed the quarterly milestones." {
-		t.Errorf("summary_text did not land: %q", plain)
+	if summaryMD != "## Summary\n\nAgreed the quarterly milestones." || summaryPlain != "Agreed the quarterly milestones." {
+		t.Errorf("summary = %q / %q", summaryMD, summaryPlain)
 	}
 	if evtID != "evt_alpha_001" {
 		t.Errorf("calendar_event_id = %q", evtID)
@@ -741,22 +817,22 @@ func TestSharedMeetingKeepsAPIOwnershipAcrossCacheSync(t *testing.T) {
 	}
 
 	var (
-		rowSource, notesMD, notesPlain, calEvent string
-		validMeeting                             int
+		rowSource, notesMD, summaryMD, summaryPlain, calEvent string
+		validMeeting                                          int
 	)
-	if err := db.QueryRowContext(ctx, `SELECT row_source, notes_markdown, notes_plain,
+	if err := db.QueryRowContext(ctx, `SELECT row_source, notes_markdown, summary_markdown, summary_plain,
 		calendar_event_id, valid_meeting FROM meetings WHERE id='note_alpha'`).Scan(
-		&rowSource, &notesMD, &notesPlain, &calEvent, &validMeeting); err != nil {
+		&rowSource, &notesMD, &summaryMD, &summaryPlain, &calEvent, &validMeeting); err != nil {
 		t.Fatalf("reading the shared meeting: %v", err)
 	}
 	if rowSource != RowSourceAPI {
 		t.Errorf("meeting row_source = %q, want %q: the cache sync took ownership of a row the API created, so the next API sync's scoped DELETE can no longer reach it", rowSource, RowSourceAPI)
 	}
-	if !strings.Contains(notesMD, "Agreed the quarterly milestones.") {
-		t.Errorf("notes_markdown = %q, want the API summary: a cache sync blanked a column only the API carries", notesMD)
+	if !strings.Contains(notesMD, "Send the milestone sheet.") {
+		t.Errorf("notes_markdown = %q, want the API private note", notesMD)
 	}
-	if notesPlain == "" {
-		t.Error("notes_plain was blanked by the cache sync")
+	if !strings.Contains(summaryMD, "Agreed the quarterly milestones.") || summaryPlain == "" {
+		t.Errorf("summary was blanked by cache sync: %q / %q", summaryMD, summaryPlain)
 	}
 	if calEvent != "evt_alpha_001" {
 		t.Errorf("calendar_event_id = %q, want evt_alpha_001", calEvent)

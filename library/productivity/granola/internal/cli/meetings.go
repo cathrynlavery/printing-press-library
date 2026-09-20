@@ -366,6 +366,12 @@ func flattenDocForJSON(md *granola.MeetingMetadata, d *granola.Document) map[str
 	if d.NotesMarkdown != "" {
 		out["notes_markdown"] = d.NotesMarkdown
 	}
+	if d.SummaryPlain != "" {
+		out["summary_plain"] = d.SummaryPlain
+	}
+	if d.SummaryMarkdown != "" {
+		out["summary_markdown"] = d.SummaryMarkdown
+	}
 	// Attendees: prefer resolved metadata when the caller has it.
 	if md != nil && len(md.Attendees) > 0 {
 		out["attendees"] = md.Attendees

@@ -414,6 +414,7 @@ func paginatedGet(c interface {
 	// Fetch all pages
 	allItems := make([]json.RawMessage, 0)
 	page := 0
+	seenCursors := map[string]bool{}
 	for {
 		page++
 		if humanFriendly {
@@ -444,6 +445,10 @@ func paginatedGet(c interface {
 					if tokenRaw, ok := rawAtPath(obj, nextCursorPath); ok {
 						var token string
 						if json.Unmarshal(tokenRaw, &token) == nil && token != "" {
+							if seenCursors[token] || token == clean[cursorParam] {
+								return nil, fmt.Errorf("pagination returned repeated cursor %q", token)
+							}
+							seenCursors[token] = true
 							clean[cursorParam] = token
 							continue
 						}
@@ -455,6 +460,9 @@ func paginatedGet(c interface {
 					if moreRaw, ok := rawAtPath(obj, hasMoreField); ok {
 						var more bool
 						if json.Unmarshal(moreRaw, &more) == nil && more {
+							if nextCursorPath != "" {
+								return nil, fmt.Errorf("pagination returned %s=true without a usable %s", hasMoreField, nextCursorPath)
+							}
 							continue
 						}
 					}
@@ -478,7 +486,7 @@ func paginatedGet(c interface {
 }
 
 func extractPaginatedItems(obj map[string]json.RawMessage) ([]json.RawMessage, bool) {
-	for _, field := range []string{"data", "items", "results", "messages", "members", "values"} {
+	for _, field := range []string{"data", "items", "results", "messages", "members", "values", "notes", "folders", "events", "transcript"} {
 		if arr, ok := obj[field]; ok {
 			var nested []json.RawMessage
 			if json.Unmarshal(arr, &nested) == nil {

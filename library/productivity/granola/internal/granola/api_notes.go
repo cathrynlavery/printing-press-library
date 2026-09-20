@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/mvanhorn/printing-press-library/library/productivity/granola/internal/client"
@@ -33,6 +34,11 @@ import (
 // number of list round-trips before the (much larger) detail stage.
 const NotesPageSizeMax = 30
 
+// TranscriptPageSizeMax is the documented ceiling for the dedicated
+// transcript endpoint. Note detail can return HTTP 413 for long meetings;
+// callers should page this endpoint instead of retrying the oversized detail.
+const TranscriptPageSizeMax = 100
+
 // Sentinel errors so callers can distinguish "skip this note" from "stop the
 // whole sync". A 404 on one note id in a page is routine (the note was
 // deleted between the list call and the detail call); a 401/403 means the
@@ -55,6 +61,9 @@ var (
 	// credential was rejected (exit code, auth hint) keeps working unchanged.
 	// 401 never matches this sentinel; it is fatal everywhere.
 	ErrAPIForbidden = errors.New("public API forbade access to this resource")
+	// ErrTranscriptTooLarge reports HTTP 413 from note detail when an embedded
+	// transcript must be retrieved from the paginated transcript endpoint.
+	ErrTranscriptTooLarge = errors.New("embedded transcript is too large")
 )
 
 // APIGetter is the slice of *client.Client this file needs. Declaring it as
@@ -166,6 +175,7 @@ func (m APIMembership) Label() string {
 // the desktop cache never carried.
 type APISpeaker struct {
 	Source            string `json:"source,omitempty"`
+	Attribution       string `json:"attribution,omitempty"`
 	Name              string `json:"name,omitempty"`
 	DiarizationLabel  string `json:"diarization_label,omitempty"`
 	Label             string `json:"label,omitempty"`
@@ -181,24 +191,34 @@ type APITranscriptSegment struct {
 	Speaker   *APISpeaker `json:"speaker,omitempty"`
 }
 
+// APITranscriptPage is one response from
+// GET /v1/notes/{note_id}/transcript.
+type APITranscriptPage struct {
+	Transcript []APITranscriptSegment `json:"transcript"`
+	HasMore    bool                   `json:"hasMore"`
+	Cursor     string                 `json:"cursor"`
+}
+
 // APINote is the full note returned by GET /v1/notes/{id}. Transcript is nil
 // unless the request passed include=transcript; a nil transcript is a normal
 // outcome, not a failure.
 type APINote struct {
-	ID               string                 `json:"id"`
-	Object           string                 `json:"object,omitempty"`
-	Title            string                 `json:"title,omitempty"`
-	WebURL           string                 `json:"web_url,omitempty"`
-	Owner            *APIPerson             `json:"owner,omitempty"`
-	CreatedAt        string                 `json:"created_at,omitempty"`
-	UpdatedAt        string                 `json:"updated_at,omitempty"`
-	CalendarEvent    *APICalendarEvent      `json:"calendar_event,omitempty"`
-	Attendees        []APIPerson            `json:"attendees,omitempty"`
-	FolderMembership []APIMembership        `json:"folder_membership,omitempty"`
-	SpaceMembership  []APIMembership        `json:"space_membership,omitempty"`
-	Transcript       []APITranscriptSegment `json:"transcript,omitempty"`
-	SummaryText      string                 `json:"summary_text,omitempty"`
-	SummaryMarkdown  string                 `json:"summary_markdown,omitempty"`
+	ID                   string                 `json:"id"`
+	Object               string                 `json:"object,omitempty"`
+	Title                string                 `json:"title,omitempty"`
+	WebURL               string                 `json:"web_url,omitempty"`
+	Owner                *APIPerson             `json:"owner,omitempty"`
+	CreatedAt            string                 `json:"created_at,omitempty"`
+	UpdatedAt            string                 `json:"updated_at,omitempty"`
+	CalendarEvent        *APICalendarEvent      `json:"calendar_event,omitempty"`
+	Attendees            []APIPerson            `json:"attendees,omitempty"`
+	FolderMembership     []APIMembership        `json:"folder_membership,omitempty"`
+	SpaceMembership      []APIMembership        `json:"space_membership,omitempty"`
+	Transcript           []APITranscriptSegment `json:"transcript,omitempty"`
+	SummaryText          string                 `json:"summary_text,omitempty"`
+	SummaryMarkdown      string                 `json:"summary_markdown,omitempty"`
+	PrivateNotesText     *string                `json:"private_notes_text"`
+	PrivateNotesMarkdown *string                `json:"private_notes_markdown"`
 }
 
 // NormalizeSpeakerSource translates the public API's speaker.source enum onto
@@ -294,8 +314,20 @@ func GetNote(c APIGetter, id string, withTranscript bool) (*APINote, error) {
 	if withTranscript {
 		params["include"] = "transcript"
 	}
-	raw, err := c.Get("/v1/notes/"+id, params)
+	raw, err := c.Get("/v1/notes/"+url.PathEscape(id), params)
 	if err != nil {
+		if withTranscript && publicAPIStatus(err) == 413 {
+			note, detailErr := GetNote(c, id, false)
+			if detailErr != nil {
+				return nil, detailErr
+			}
+			transcript, transcriptErr := GetTranscriptAll(c, id, TranscriptPageSizeMax)
+			if transcriptErr != nil {
+				return nil, transcriptErr
+			}
+			note.Transcript = transcript
+			return note, nil
+		}
 		return nil, classifyPublicAPIError(err, "get note "+id)
 	}
 	var note APINote
@@ -308,6 +340,92 @@ func GetNote(c APIGetter, id string, withTranscript bool) (*APINote, error) {
 	return &note, nil
 }
 
+// GetTranscriptPage fetches one page from the dedicated transcript endpoint.
+func GetTranscriptPage(c APIGetter, id, cursor string, pageSize int) (APITranscriptPage, error) {
+	var page APITranscriptPage
+	if c == nil {
+		return page, fmt.Errorf("nil api client")
+	}
+	if id == "" {
+		return page, fmt.Errorf("empty note id")
+	}
+	if pageSize <= 0 || pageSize > TranscriptPageSizeMax {
+		pageSize = TranscriptPageSizeMax
+	}
+	params := map[string]string{"page_size": fmt.Sprintf("%d", pageSize)}
+	if cursor != "" {
+		params["cursor"] = cursor
+	}
+	raw, err := c.Get("/v1/notes/"+url.PathEscape(id)+"/transcript", params)
+	if err != nil {
+		return page, classifyPublicAPIError(err, "get transcript "+id)
+	}
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return page, fmt.Errorf("get transcript %s: decoding response: %w", id, err)
+	}
+	return page, nil
+}
+
+// GetTranscriptAll follows transcript cursors until the API reports the final
+// page. A repeated or missing cursor while hasMore is true is treated as a
+// protocol error so a malformed response cannot loop forever.
+func GetTranscriptAll(c APIGetter, id string, pageSize int) ([]APITranscriptSegment, error) {
+	var out []APITranscriptSegment
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		page, err := GetTranscriptPage(c, id, cursor, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page.Transcript...)
+		if !page.HasMore {
+			return out, nil
+		}
+		if page.Cursor == "" || seen[page.Cursor] {
+			return nil, fmt.Errorf("get transcript %s: API returned hasMore with a missing or repeated cursor", id)
+		}
+		seen[page.Cursor] = true
+		cursor = page.Cursor
+	}
+}
+
+// TranscriptSegments converts the public API representation into the cache /
+// store representation consumed by transcript, export, and talktime commands.
+func TranscriptSegments(id string, in []APITranscriptSegment) []TranscriptSegment {
+	out := make([]TranscriptSegment, 0, len(in))
+	for _, seg := range in {
+		converted := TranscriptSegment{
+			DocumentID:     id,
+			Text:           seg.Text,
+			StartTimestamp: seg.StartTime,
+			EndTimestamp:   seg.EndTime,
+			IsFinal:        true,
+		}
+		if seg.Speaker != nil {
+			converted.Source = NormalizeSpeakerSource(seg.Speaker.Source)
+			converted.Attribution = seg.Speaker.Attribution
+			converted.SpeakerName = seg.Speaker.ResolvedName()
+			converted.DiarizationLabel = seg.Speaker.ResolvedLabel()
+		}
+		out = append(out, converted)
+	}
+	return out
+}
+
+func publicAPIStatus(err error) int {
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode
+	}
+	for _, status := range []int{401, 403, 404, 413} {
+		if strings.Contains(err.Error(), fmt.Sprintf("HTTP %d", status)) {
+			return status
+		}
+	}
+	return 0
+}
+
 // classifyPublicAPIError maps client transport errors onto the sentinels
 // above. Falls back to substring matching when the error is not a
 // *client.APIError so that wrapped/retried failures still classify.
@@ -315,20 +433,7 @@ func classifyPublicAPIError(err error, what string) error {
 	if err == nil {
 		return nil
 	}
-	status := 0
-	var apiErr *client.APIError
-	if errors.As(err, &apiErr) {
-		status = apiErr.StatusCode
-	} else {
-		switch {
-		case strings.Contains(err.Error(), "HTTP 404"):
-			status = 404
-		case strings.Contains(err.Error(), "HTTP 401"):
-			status = 401
-		case strings.Contains(err.Error(), "HTTP 403"):
-			status = 403
-		}
-	}
+	status := publicAPIStatus(err)
 	// Multiple %w verbs so the result matches BOTH the sentinels (errors.Is)
 	// and the underlying *client.APIError (errors.As).
 	switch status {
@@ -341,6 +446,8 @@ func classifyPublicAPIError(err error, what string) error {
 		// list of ids can skip the forbidden one instead of discarding the
 		// whole run. See ErrAPIForbidden.
 		return fmt.Errorf("%s: %w: %w: %w", what, ErrAPIUnauthorized, ErrAPIForbidden, err)
+	case 413:
+		return fmt.Errorf("%s: %w: %w", what, ErrTranscriptTooLarge, err)
 	}
 	return fmt.Errorf("%s: %w", what, err)
 }

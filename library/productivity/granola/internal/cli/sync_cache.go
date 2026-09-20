@@ -162,6 +162,28 @@ The hydration is idempotent: re-running replaces every row.`,
 			if res.PreservedTranscripts > 0 {
 				summary["preserved_transcripts"] = res.PreservedTranscripts
 			}
+			warnings := make([]string, 0, 6)
+			if res.HydrateErr != nil {
+				warnings = append(warnings, fmt.Sprintf("documents API hydrate failed: %v", res.HydrateErr))
+			}
+			if res.StateWriteErr != nil {
+				warnings = append(warnings, fmt.Sprintf("failed to write sync state: %v", res.StateWriteErr))
+			}
+			if res.TimestampWarning != "" {
+				warnings = append(warnings, res.TimestampWarning)
+			}
+			if res.PreservationWarning != "" {
+				warnings = append(warnings, res.PreservationWarning)
+			}
+			if res.TranscriptErr != nil {
+				warnings = append(warnings, fmt.Sprintf("transcript backfill stopped early: %v", res.TranscriptErr))
+			}
+			if res.CatalogErr != nil {
+				warnings = append(warnings, fmt.Sprintf("catalog refresh incomplete: %v", res.CatalogErr))
+			}
+			if len(warnings) > 0 {
+				summary["warnings"] = warnings
+			}
 			b, _ := json.Marshal(summary)
 			fmt.Fprintln(cmd.OutOrStdout(), string(b))
 			// Surface the hydrate error as a non-fatal warning to stderr

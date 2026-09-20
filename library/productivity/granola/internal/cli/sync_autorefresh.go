@@ -70,6 +70,10 @@ const (
 	// per note that actually changed. Backfilling an account from scratch
 	// stays the explicit `sync-api` command's job.
 	autoRefreshHydrateMaxPages = 1
+	// autoRefreshListMaxPages bounds the generated list stage too. Passing 0
+	// made an ordinary read command walk an unlimited account-wide result set
+	// before its actual work began.
+	autoRefreshListMaxPages = 5
 
 	// autoRefreshHydrateOverlap is re-scanned on every run. updated_after is
 	// evaluated against the API's clock while the checkpoint is local wall
@@ -147,13 +151,12 @@ func runApiSync(ctx context.Context, flags *rootFlags) (ApiSyncResult, error) {
 		default:
 		}
 		// Auto-refresh defaults: no --since cursor reset, no --full,
-		// no max-pages override (newSyncCmd's default 100 wins), no
-		// latest-only, no user params.
+		// a small max-pages bound, no latest-only, no user params.
 		//
 		// PATCH(autorefresh-no-stdout): quiet streams. syncResource's
 		// ndjson goes to the process stdout by default, which would land
 		// ahead of the user's own `--json` payload on every command.
-		res := syncResourceTo(quietSyncStreams(), c, db, resource, "", false, 0, false, nil)
+		res := syncResourceTo(quietSyncStreams(), c, db, resource, "", false, autoRefreshListMaxPages, false, nil)
 		switch {
 		case res.Err != nil:
 			errCount++

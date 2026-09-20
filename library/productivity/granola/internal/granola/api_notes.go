@@ -3,6 +3,7 @@
 package granola
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,6 +72,17 @@ var (
 // lets callers pass the shared client built by rootFlags.newClient().
 type APIGetter interface {
 	Get(path string, params map[string]string) (json.RawMessage, error)
+}
+
+type apiContextGetter interface {
+	GetContext(ctx context.Context, path string, params map[string]string) (json.RawMessage, error)
+}
+
+func apiGet(ctx context.Context, c APIGetter, path string, params map[string]string) (json.RawMessage, error) {
+	if withContext, ok := c.(apiContextGetter); ok {
+		return withContext.GetContext(ctx, path, params)
+	}
+	return c.Get(path, params)
 }
 
 // APIPerson is a person as the public API renders them. Attendees carry both
@@ -268,6 +280,10 @@ func (s *APISpeaker) ResolvedLabel() string {
 // extraParams carries optional server-side filters (created_before,
 // created_after, updated_after, folder_id). Empty values are dropped.
 func ListNotesPage(c APIGetter, cursor string, pageSize int, extraParams map[string]string) (APINotesPage, error) {
+	return ListNotesPageContext(context.Background(), c, cursor, pageSize, extraParams)
+}
+
+func ListNotesPageContext(ctx context.Context, c APIGetter, cursor string, pageSize int, extraParams map[string]string) (APINotesPage, error) {
 	var page APINotesPage
 	if c == nil {
 		return page, fmt.Errorf("nil api client")
@@ -284,7 +300,7 @@ func ListNotesPage(c APIGetter, cursor string, pageSize int, extraParams map[str
 	if cursor != "" {
 		params["cursor"] = cursor
 	}
-	raw, err := c.Get("/v1/notes", params)
+	raw, err := apiGet(ctx, c, "/v1/notes", params)
 	if err != nil {
 		return page, classifyPublicAPIError(err, "list notes")
 	}
@@ -304,6 +320,10 @@ func ListNotesPage(c APIGetter, cursor string, pageSize int, extraParams map[str
 // which on this single-note endpoint is a verdict about the note rather than
 // the credential — see that sentinel's comment.
 func GetNote(c APIGetter, id string, withTranscript bool) (*APINote, error) {
+	return GetNoteContext(context.Background(), c, id, withTranscript)
+}
+
+func GetNoteContext(ctx context.Context, c APIGetter, id string, withTranscript bool) (*APINote, error) {
 	if c == nil {
 		return nil, fmt.Errorf("nil api client")
 	}
@@ -314,14 +334,14 @@ func GetNote(c APIGetter, id string, withTranscript bool) (*APINote, error) {
 	if withTranscript {
 		params["include"] = "transcript"
 	}
-	raw, err := c.Get("/v1/notes/"+url.PathEscape(id), params)
+	raw, err := apiGet(ctx, c, "/v1/notes/"+url.PathEscape(id), params)
 	if err != nil {
 		if withTranscript && publicAPIStatus(err) == 413 {
-			note, detailErr := GetNote(c, id, false)
+			note, detailErr := GetNoteContext(ctx, c, id, false)
 			if detailErr != nil {
 				return nil, detailErr
 			}
-			transcript, transcriptErr := GetTranscriptAll(c, id, TranscriptPageSizeMax)
+			transcript, transcriptErr := GetTranscriptAllContext(ctx, c, id, TranscriptPageSizeMax)
 			if transcriptErr != nil {
 				return nil, transcriptErr
 			}
@@ -342,6 +362,10 @@ func GetNote(c APIGetter, id string, withTranscript bool) (*APINote, error) {
 
 // GetTranscriptPage fetches one page from the dedicated transcript endpoint.
 func GetTranscriptPage(c APIGetter, id, cursor string, pageSize int) (APITranscriptPage, error) {
+	return GetTranscriptPageContext(context.Background(), c, id, cursor, pageSize)
+}
+
+func GetTranscriptPageContext(ctx context.Context, c APIGetter, id, cursor string, pageSize int) (APITranscriptPage, error) {
 	var page APITranscriptPage
 	if c == nil {
 		return page, fmt.Errorf("nil api client")
@@ -356,7 +380,7 @@ func GetTranscriptPage(c APIGetter, id, cursor string, pageSize int) (APITranscr
 	if cursor != "" {
 		params["cursor"] = cursor
 	}
-	raw, err := c.Get("/v1/notes/"+url.PathEscape(id)+"/transcript", params)
+	raw, err := apiGet(ctx, c, "/v1/notes/"+url.PathEscape(id)+"/transcript", params)
 	if err != nil {
 		return page, classifyPublicAPIError(err, "get transcript "+id)
 	}
@@ -370,11 +394,15 @@ func GetTranscriptPage(c APIGetter, id, cursor string, pageSize int) (APITranscr
 // page. A repeated or missing cursor while hasMore is true is treated as a
 // protocol error so a malformed response cannot loop forever.
 func GetTranscriptAll(c APIGetter, id string, pageSize int) ([]APITranscriptSegment, error) {
+	return GetTranscriptAllContext(context.Background(), c, id, pageSize)
+}
+
+func GetTranscriptAllContext(ctx context.Context, c APIGetter, id string, pageSize int) ([]APITranscriptSegment, error) {
 	var out []APITranscriptSegment
 	cursor := ""
 	seen := map[string]bool{}
 	for {
-		page, err := GetTranscriptPage(c, id, cursor, pageSize)
+		page, err := GetTranscriptPageContext(ctx, c, id, cursor, pageSize)
 		if err != nil {
 			return nil, err
 		}

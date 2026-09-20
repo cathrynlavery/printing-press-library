@@ -147,7 +147,7 @@ func loadTranscriptWithFlags(ctx context.Context, id string, flags *rootFlags) (
 	// fallback, including explicit --data-source live requests backed by the
 	// CLI-owned session.
 	if strings.HasPrefix(id, "not_") && c.Config != nil && c.Config.AuthHeader() != "" {
-		segments, err := granola.GetTranscriptAll(c, id, granola.TranscriptPageSizeMax)
+		segments, err := granola.GetTranscriptAllContext(ctx, c, id, granola.TranscriptPageSizeMax)
 		if err != nil {
 			return nil, "", classifyAPIError(err, flags)
 		}

@@ -187,6 +187,31 @@ func TestGetTranscriptAllRejectsRepeatedCursor(t *testing.T) {
 	}
 }
 
+func TestGetNoteContextCancelsInFlightRequest(t *testing.T) {
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := GetNoteContext(ctx, testClient(t, srv.URL), "not_cancel", false)
+		done <- err
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request did not stop after context cancellation")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Transport-level tests.
 // ---------------------------------------------------------------------------

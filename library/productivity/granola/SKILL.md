@@ -336,7 +336,7 @@ Transcripts get one extra guard. Granola applies transcript retention upstream, 
 
 ### 3. Read with no key
 
-Once hydrated, every read command works offline with no credentials. `granola-pp-cli transcript get <id> --json` returns byte-identical output with and without `GRANOLA_API_KEY` set.
+Once hydrated, every read command works offline with no credentials. `granola-pp-cli transcript get <id> --json` returns byte-identical output with and without `GRANOLA_API_KEY` set. Its top-level `source` field is one of `store` (SQLite), `cache` (legacy desktop cache), or `live` (public or internal API).
 
 ### Legacy and pre-migration installs
 

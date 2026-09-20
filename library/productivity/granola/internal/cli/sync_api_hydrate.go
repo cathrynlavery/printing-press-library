@@ -64,6 +64,7 @@ type apiHydrateResult struct {
 	Memberships int
 	Summaries   int
 	Events      int
+	Deleted     int
 	Warnings    []string
 	Duration    time.Duration
 
@@ -127,16 +128,58 @@ func runAPIHydrate(ctx context.Context, flags *rootFlags, opts apiHydrateOptions
 		listParams["updated_after"] = opts.UpdatedAfter
 	}
 
-	var notes []granola.APINote
+	s, err := openGranolaStoreAt(ctx, opts.DBPath)
+	if err != nil {
+		res.Duration = time.Since(started)
+		return res, err
+	}
+	defer s.Close()
+
+	var pending []granola.APINote
+	seenIDs := map[string]struct{}{}
+	listComplete := false
+	flush := func(flushCtx context.Context) error {
+		if len(pending) == 0 {
+			return nil
+		}
+		sres, syncErr := granola.SyncFromAPI(flushCtx, s.DB(), pending)
+		res.Meetings += sres.Meetings
+		res.Attendees += sres.Attendees
+		res.Segments += sres.Segments
+		res.Folders += sres.Folders
+		res.Memberships += sres.Memberships
+		res.Summaries += sres.Summaries
+		res.Events += sres.Events
+		res.UnparsedTimestamps += sres.UnparsedTimestamps
+		if sres.TimestampWarning != "" {
+			res.Warnings = append(res.Warnings, sres.TimestampWarning)
+		}
+		res.PreservedTranscripts += sres.PreservedTranscripts
+		if sres.PreservationWarning != "" {
+			res.Warnings = append(res.Warnings, sres.PreservationWarning)
+		}
+		if syncErr == nil {
+			pending = pending[:0]
+		}
+		return syncErr
+	}
+	flushBeforeAbort := func(cause error) error {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if flushErr := flush(flushCtx); flushErr != nil {
+			return fmt.Errorf("%w (also failed to persist fetched notes: %v)", cause, flushErr)
+		}
+		return cause
+	}
 	cursor := ""
 	for page := 0; page < maxPages; page++ {
 		select {
 		case <-ctx.Done():
 			res.Duration = time.Since(started)
-			return res, ctx.Err()
+			return res, flushBeforeAbort(ctx.Err())
 		default:
 		}
-		listPage, err := granola.ListNotesPage(c, cursor, opts.PageSize, listParams)
+		listPage, err := granola.ListNotesPageContext(ctx, c, cursor, opts.PageSize, listParams)
 		if err != nil {
 			res.Duration = time.Since(started)
 			return res, hydrateError(err, flags)
@@ -146,6 +189,7 @@ func runAPIHydrate(ctx context.Context, flags *rootFlags, opts apiHydrateOptions
 			if ref.ID == "" {
 				continue
 			}
+			seenIDs[ref.ID] = struct{}{}
 			// PATCH(autorefresh-api-hydrates-domain-tables): the detail
 			// fetches are the expensive part (one request per note), and the
 			// HTTP client carries its own per-request timeout rather than
@@ -155,10 +199,10 @@ func runAPIHydrate(ctx context.Context, flags *rootFlags, opts apiHydrateOptions
 			select {
 			case <-ctx.Done():
 				res.Duration = time.Since(started)
-				return res, ctx.Err()
+				return res, flushBeforeAbort(ctx.Err())
 			default:
 			}
-			note, err := granola.GetNote(c, ref.ID, !opts.SkipTranscripts)
+			note, err := granola.GetNoteContext(ctx, c, ref.ID, !opts.SkipTranscripts)
 			if err != nil {
 				if reason := skippableNoteError(err); reason != "" {
 					res.Skipped++
@@ -167,44 +211,40 @@ func runAPIHydrate(ctx context.Context, flags *rootFlags, opts apiHydrateOptions
 					continue
 				}
 				res.Duration = time.Since(started)
-				return res, hydrateError(err, flags)
+				mapped := hydrateError(err, flags)
+				// A 401 invalidates the whole credential and must not commit the
+				// current page. Transient transport/429/5xx failures do flush the
+				// successfully fetched prefix so a late blip does not discard it.
+				if errors.Is(err, granola.ErrAPIUnauthorized) && !errors.Is(err, granola.ErrAPIForbidden) {
+					return res, mapped
+				}
+				return res, flushBeforeAbort(mapped)
 			}
-			notes = append(notes, *note)
+			pending = append(pending, *note)
+			res.NotesFetched++
 		}
-		if !listPage.HasMore || listPage.Cursor == "" || listPage.Cursor == cursor {
+		if err := flush(ctx); err != nil {
+			res.Duration = time.Since(started)
+			return res, err
+		}
+		if !listPage.HasMore {
+			listComplete = true
+			break
+		}
+		if listPage.Cursor == "" || listPage.Cursor == cursor {
 			break
 		}
 		cursor = listPage.Cursor
 	}
-	res.NotesFetched = len(notes)
-
-	s, err := openGranolaStoreAt(ctx, opts.DBPath)
-	if err != nil {
-		res.Duration = time.Since(started)
-		return res, err
-	}
-	defer s.Close()
-
-	sres, err := granola.SyncFromAPI(ctx, s.DB(), notes)
-	res.Meetings = sres.Meetings
-	res.Attendees = sres.Attendees
-	res.Segments = sres.Segments
-	res.Folders = sres.Folders
-	res.Memberships = sres.Memberships
-	res.Summaries = sres.Summaries
-	res.Events = sres.Events
-	res.UnparsedTimestamps = sres.UnparsedTimestamps
-	if sres.TimestampWarning != "" {
-		res.Warnings = append(res.Warnings, sres.TimestampWarning)
-	}
-	res.PreservedTranscripts = sres.PreservedTranscripts
-	if sres.PreservationWarning != "" {
-		res.Warnings = append(res.Warnings, sres.PreservationWarning)
+	if opts.UpdatedAfter == "" && listComplete {
+		deleted, err := granola.ReconcileMissingAPINotes(ctx, s.DB(), seenIDs)
+		if err != nil {
+			res.Duration = time.Since(started)
+			return res, err
+		}
+		res.Deleted = deleted
 	}
 	res.Duration = time.Since(started)
-	if err != nil {
-		return res, err
-	}
 	return res, nil
 }
 
@@ -255,6 +295,7 @@ func writeAPIHydrateSummary(w io.Writer, res apiHydrateResult) error {
 		"folder_memberships":  res.Memberships,
 		"summaries":           res.Summaries,
 		"calendar_events":     res.Events,
+		"deleted":             res.Deleted,
 	}
 	if res.UnparsedTimestamps > 0 {
 		summary["unparsed_timestamps"] = res.UnparsedTimestamps

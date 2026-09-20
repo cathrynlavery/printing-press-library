@@ -44,7 +44,9 @@ func openGranolaCache() (*granola.Cache, error) {
 	// Best-effort document backfill; errors logged but not fatal so
 	// commands that only need transcripts/folders still work when the
 	// store is unavailable.
-	_ = backfillDocumentsFromStore(c)
+	if err := backfillDocumentsFromStore(c); err != nil {
+		stderr("warning: failed to backfill Granola documents from local store: %v", err)
+	}
 	return c, nil
 }
 
@@ -84,10 +86,21 @@ func openGranolaRead(ctx context.Context) (*granolaRead, error) {
 		ctx = context.Background()
 	}
 	v := &granolaRead{ctx: ctx}
-	// A store that exists but fails to open is treated as absent; the cache
-	// fallback below is still worth trying.
-	if s, err := openGranolaStoreRead(ctx); err == nil {
-		v.store = s
+	s, err := openGranolaStoreRead(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("opening local Granola store: %w", err)
+	}
+	if s != nil {
+		ready, readyErr := granola.StoreHasData(ctx, s.DB())
+		if readyErr != nil {
+			s.Close()
+			return nil, fmt.Errorf("probing local Granola store: %w", readyErr)
+		}
+		if ready {
+			v.store = s
+		} else {
+			s.Close()
+		}
 	}
 	// A cache that will not decrypt is the steady state on migrated
 	// installs; the decrypt error is deliberately dropped rather than
@@ -287,6 +300,7 @@ func (v *granolaRead) storeDocuments() map[string]granola.Document {
 		       COALESCE(summary_markdown, ''), COALESCE(summary_plain, ''),
 		       creation_source, valid_meeting
 		FROM meetings
+		WHERE deleted_at IS NULL OR deleted_at = ''
 	`)
 	if err != nil {
 		return out
@@ -995,6 +1009,7 @@ func backfillDocumentsFromStore(c *granola.Cache) error {
 		       COALESCE(summary_markdown, ''), COALESCE(summary_plain, ''),
 		       creation_source, valid_meeting
 		FROM meetings
+		WHERE deleted_at IS NULL OR deleted_at = ''
 	`)
 	if err != nil {
 		return fmt.Errorf("backfill: query meetings: %w", err)

@@ -5,6 +5,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -69,14 +70,22 @@ func (c *Client) Get(path string, params map[string]string) (json.RawMessage, er
 	return c.GetWithHeaders(path, params, nil)
 }
 
+func (c *Client) GetContext(ctx context.Context, path string, params map[string]string) (json.RawMessage, error) {
+	return c.GetWithHeadersContext(ctx, path, params, nil)
+}
+
 func (c *Client) GetWithHeaders(path string, params map[string]string, headers map[string]string) (json.RawMessage, error) {
+	return c.GetWithHeadersContext(context.Background(), path, params, headers)
+}
+
+func (c *Client) GetWithHeadersContext(ctx context.Context, path string, params map[string]string, headers map[string]string) (json.RawMessage, error) {
 	// Check cache for GET requests
 	if !c.NoCache && !c.DryRun && c.cacheDir != "" {
 		if cached, ok := c.readCache(path, params); ok {
 			return cached, nil
 		}
 	}
-	result, _, err := c.do("GET", path, params, nil, headers)
+	result, _, err := c.doContext(ctx, "GET", path, params, nil, headers)
 	if err == nil && !c.NoCache && !c.DryRun && c.cacheDir != "" {
 		c.writeCache(path, params, result)
 	}
@@ -177,6 +186,13 @@ func (c *Client) PatchWithHeaders(path string, body any, headers map[string]stri
 // do executes an HTTP request. headerOverrides, when non-nil, override global
 // RequiredHeaders for this specific request (used for per-endpoint API versioning).
 func (c *Client) do(method, path string, params map[string]string, body any, headerOverrides map[string]string) (json.RawMessage, int, error) {
+	return c.doContext(context.Background(), method, path, params, body, headerOverrides)
+}
+
+func (c *Client) doContext(ctx context.Context, method, path string, params map[string]string, body any, headerOverrides map[string]string) (json.RawMessage, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Keep authentication and rate-limit recovery available; only ambiguous
 	// transport/server failures must not replay an unprotected write.
 	canRetryAmbiguousFailure := method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
@@ -210,6 +226,9 @@ func (c *Client) do(method, path string, params map[string]string, body any, hea
 	var lastErr error
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
 		// Proactive rate limiting — wait before sending
 		c.limiter.Wait()
 		var bodyReader io.Reader
@@ -217,7 +236,7 @@ func (c *Client) do(method, path string, params map[string]string, body any, hea
 			bodyReader = strings.NewReader(string(bodyBytes))
 		}
 
-		req, err := http.NewRequest(method, targetURL, bodyReader)
+		req, err := http.NewRequestWithContext(ctx, method, targetURL, bodyReader)
 		if err != nil {
 			return nil, 0, fmt.Errorf("creating request: %w", err)
 		}
@@ -296,7 +315,9 @@ func (c *Client) do(method, path string, params map[string]string, body any, hea
 			c.limiter.OnRateLimit()
 			wait := cliutil.RetryAfter(resp)
 			fmt.Fprintf(os.Stderr, "rate limited, waiting %s (attempt %d/%d, rate adjusted to %.1f req/s)\n", wait, attempt+1, maxRetries, c.limiter.Rate())
-			time.Sleep(wait)
+			if err := waitForContext(ctx, wait); err != nil {
+				return nil, 0, err
+			}
 			lastErr = apiErr
 			continue
 		}
@@ -305,7 +326,9 @@ func (c *Client) do(method, path string, params map[string]string, body any, hea
 		if resp.StatusCode >= 500 && attempt < maxRetries && canRetryAmbiguousFailure {
 			wait := time.Duration(math.Pow(2, float64(attempt))) * time.Second
 			fmt.Fprintf(os.Stderr, "server error %d, retrying in %s (attempt %d/%d)\n", resp.StatusCode, wait, attempt+1, maxRetries)
-			time.Sleep(wait)
+			if err := waitForContext(ctx, wait); err != nil {
+				return nil, 0, err
+			}
 			lastErr = apiErr
 			continue
 		}
@@ -315,6 +338,17 @@ func (c *Client) do(method, path string, params map[string]string, body any, hea
 	}
 
 	return nil, 0, lastErr
+}
+
+func waitForContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // dryRun prints the outgoing request exactly as the live path would send it,

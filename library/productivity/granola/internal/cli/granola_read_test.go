@@ -709,13 +709,17 @@ func TestGranolaRead_Chat_CacheFallback_WhenStoreEmpty(t *testing.T) {
 }
 
 // TestGranolaRead_RecipeAndChatReaders_EmptyEverywhere covers the state a
-// fresh install sits in between `sync-api` and `sync`: the store exists but
-// none of these four tables has a row, and no cache is readable. Every
-// accessor must answer empty rather than panic.
+// successfully synced account can occupy: the store has a successful-sync
+// marker but none of these four tables has a row. Every accessor must answer
+// empty rather than panic.
 func TestGranolaRead_RecipeAndChatReaders_EmptyEverywhere(t *testing.T) {
 	db := newGranolaFixture(t)
 	t.Setenv("GRANOLA_API_KEY", "")
-	withStoreDB(t, db, func(context.Context, *sql.DB) {}) // create the schema, seed nothing
+	withStoreDB(t, db, func(ctx context.Context, sqlDB *sql.DB) {
+		if _, err := granola.SyncFromAPI(ctx, sqlDB, nil); err != nil {
+			t.Fatalf("mark empty store as successfully synced: %v", err)
+		}
+	})
 
 	v := openRead(t)
 	if got := v.Recipes(); got == nil || len(got) != 0 {
@@ -732,6 +736,30 @@ func TestGranolaRead_RecipeAndChatReaders_EmptyEverywhere(t *testing.T) {
 	}
 	if got := v.ChatThreadMessages("nope"); got == nil || len(got) != 0 {
 		t.Errorf("ChatThreadMessages() = %+v, want an empty slice", got)
+	}
+}
+
+func TestGranolaRead_EmptySchemaWithoutSuccessfulSyncIsNotReady(t *testing.T) {
+	db := newGranolaFixture(t)
+	withStoreDB(t, db, func(context.Context, *sql.DB) {})
+	if _, err := openGranolaRead(context.Background()); err == nil || !strings.Contains(err.Error(), "run `granola-pp-cli sync-api`") {
+		t.Fatalf("error = %v, want actionable first-sync guidance", err)
+	}
+}
+
+func TestGranolaRead_CorruptStoreErrorIsNotDiscarded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GRANOLA_CACHE_PATH", filepath.Join(home, "missing-cache.json"))
+	dbPath := defaultDBPath("granola-pp-cli")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dbPath, []byte("not sqlite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openGranolaRead(context.Background()); err == nil || !strings.Contains(err.Error(), "opening local Granola store") {
+		t.Fatalf("error = %v, want corrupt-store detail", err)
 	}
 }
 

@@ -231,13 +231,16 @@ func TestChatGet_ServedFromStore_NoCache(t *testing.T) {
 }
 
 // TestRecipesAndChatList_EmptyStore_ExitZero: a database that exists with zero
-// rows is an empty answer, not a failure. This is the state a fresh install
-// sits in between `sync-api` and `sync`.
+// rows is an empty answer after a successful sync, not a failure.
 func TestRecipesAndChatList_EmptyStore_ExitZero(t *testing.T) {
 	db := newGranolaFixture(t)
 	isolateSyncState(t, time.Time{})
 	t.Setenv("GRANOLA_API_KEY", "")
-	withStoreDB(t, db, func(context.Context, *sql.DB) {}) // create the schema, seed nothing
+	withStoreDB(t, db, func(ctx context.Context, sqlDB *sql.DB) {
+		if _, err := granola.SyncFromAPI(ctx, sqlDB, nil); err != nil {
+			t.Fatalf("mark empty store as successfully synced: %v", err)
+		}
+	})
 
 	stdout, _, err := runCLISplit(t, "recipes", "list", "--json")
 	if err != nil {

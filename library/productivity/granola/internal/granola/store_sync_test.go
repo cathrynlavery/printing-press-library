@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -256,6 +257,72 @@ func TestEnsureSchema_SecondRunIsNoOp(t *testing.T) {
 	}
 	if got := queryString(t, db, `SELECT description FROM folders WHERE id = ?`, "fold_1"); got != "Everything customer facing" {
 		t.Errorf("description after second EnsureSchema = %q", got)
+	}
+}
+
+func TestEnsureSchemaSerializesConcurrentFirstOpen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "concurrent.db")
+	db1, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db1.Close()
+	db2, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, db := range []*sql.DB{db1, db2} {
+		wg.Add(1)
+		go func(db *sql.DB) {
+			defer wg.Done()
+			<-start
+			errs <- EnsureSchema(context.Background(), db)
+		}(db)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent EnsureSchema: %v", err)
+		}
+	}
+}
+
+func TestSyncMaintainsFTSIncrementally(t *testing.T) {
+	db := openRawDB(t)
+	note := apiNoteWithTranscript("note_fts", 1)
+	note.Title = "Quarterly planning"
+	note.Transcript[0].Text = "alpha transcript"
+	if _, err := SyncFromAPI(context.Background(), db, []APINote{note}); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM meetings_fts WHERE meetings_fts MATCH 'quarterly'`); got != 1 {
+		t.Fatalf("initial meeting FTS count = %d", got)
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM transcript_fts WHERE transcript_fts MATCH 'alpha'`); got != 1 {
+		t.Fatalf("initial transcript FTS count = %d", got)
+	}
+	note.Title = "Roadmap review"
+	note.Transcript[0].Text = "beta transcript"
+	if _, err := SyncFromAPI(context.Background(), db, []APINote{note}); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM meetings_fts WHERE meetings_fts MATCH 'quarterly'`); got != 0 {
+		t.Fatalf("stale meeting FTS count = %d", got)
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM meetings_fts WHERE meetings_fts MATCH 'roadmap'`); got != 1 {
+		t.Fatalf("updated meeting FTS count = %d", got)
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM transcript_fts WHERE transcript_fts MATCH 'alpha'`); got != 0 {
+		t.Fatalf("stale transcript FTS count = %d", got)
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM transcript_fts WHERE transcript_fts MATCH 'beta'`); got != 1 {
+		t.Fatalf("updated transcript FTS count = %d", got)
 	}
 }
 

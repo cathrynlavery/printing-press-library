@@ -54,7 +54,7 @@
           "name": "page_size",
           "type": "int",
           "location": "query",
-          "description": "Page size"
+          "description": "Page size (1-30; default 10)"
         }
       ]
     },
@@ -119,7 +119,7 @@
           "name": "page_size",
           "type": "int",
           "location": "query",
-          "description": "Page size"
+          "description": "Page size (1-30; default 10)"
         }
       ]
     }

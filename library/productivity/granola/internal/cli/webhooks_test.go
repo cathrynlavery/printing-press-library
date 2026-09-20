@@ -52,6 +52,34 @@ func TestWebhooksCreatePreservesOneTimeSecret(t *testing.T) {
 	}
 }
 
+func TestWebhooksCreateHonorsQuietAndSelect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"whe_1","signing_secret":"whsec_c3ludGhldGlj","url_redacted":"https://example.test/***"}`))
+	}))
+	defer srv.Close()
+	t.Setenv("GRANOLA_BASE_URL", srv.URL)
+	t.Setenv("GRANOLA_API_KEY", "grn_test_key")
+
+	quietOut, _, err := runCLISplit(t, "webhooks", "create", "--url", "https://example.test/hook", "--scope", "personal", "--quiet")
+	if err != nil {
+		t.Fatalf("webhooks create --quiet: %v", err)
+	}
+	if quietOut != "" {
+		t.Fatalf("--quiet output = %q, want empty", quietOut)
+	}
+
+	selectedOut, _, err := runCLISplit(t, "webhooks", "create", "--url", "https://example.test/hook", "--scope", "personal", "--select", "id", "--json")
+	if err != nil {
+		t.Fatalf("webhooks create --select id: %v", err)
+	}
+	if strings.Contains(selectedOut, "signing_secret") || strings.Contains(selectedOut, "whsec_") {
+		t.Fatalf("--select id leaked signing secret: %s", selectedOut)
+	}
+	if !strings.Contains(selectedOut, `"id"`) {
+		t.Fatalf("--select id output = %s", selectedOut)
+	}
+}
+
 func TestWebhooksUpdateCanClearFoldersAndDisable(t *testing.T) {
 	const endpointID = "whe_1234567890ABCD"
 	var body map[string]any

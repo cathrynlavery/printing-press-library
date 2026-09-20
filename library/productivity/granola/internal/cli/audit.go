@@ -116,6 +116,10 @@ func newAuditListCmd(flags *rootFlags) *cobra.Command {
 }
 
 func normalizeAuditTimestamp(flagName, value string) (string, error) {
+	return normalizeAuditTimestampAt(flagName, value, time.Now())
+}
+
+func normalizeAuditTimestampAt(flagName, value string, now time.Time) (string, error) {
 	value = strings.TrimSpace(value)
 	var (
 		parsed time.Time
@@ -128,6 +132,10 @@ func normalizeAuditTimestamp(flagName, value string) (string, error) {
 	}
 	if err != nil {
 		return "", usageErr(fmt.Errorf("invalid --%s %q: expected YYYY-MM-DD or RFC3339 timestamp", flagName, value))
+	}
+	cutoff := now.UTC().AddDate(-1, 0, 0)
+	if parsed.Before(cutoff) {
+		return "", usageErr(fmt.Errorf("invalid --%s %q: Granola audit events are retained for one year; earliest available timestamp is %s", flagName, value, cutoff.Format(time.RFC3339)))
 	}
 	return granolaAPITimestamp(parsed), nil
 }

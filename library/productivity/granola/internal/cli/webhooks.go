@@ -80,8 +80,14 @@ func newWebhooksCreateCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return classifyAPIError(err, flags)
 			}
-			// Never compact create output: signing_secret is shown only once.
-			return printOutput(cmd.OutOrStdout(), raw, true)
+			// Never compact the default create output: signing_secret is shown
+			// only once. Still honor explicit suppression and field selection so
+			// --quiet and --select id cannot leak the secret into automation logs.
+			outputFlags := *flags
+			if outputFlags.selectFields == "" {
+				outputFlags.compact = false
+			}
+			return printOutputWithFlags(cmd.OutOrStdout(), raw, &outputFlags)
 		},
 	}
 	cmd.Flags().StringVar(&endpointURL, "url", "", "HTTPS delivery URL")

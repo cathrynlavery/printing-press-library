@@ -355,7 +355,7 @@ func TestMigrate_RejectsNewerDBImmediately(t *testing.T) {
 	}
 }
 
-func TestMigrateV5SeparatesAPISummaryFromPrivateNotes(t *testing.T) {
+func TestMigrateV5CopiesAPISummaryWithoutDiscardingAmbiguousNotes(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "data.db")
 	raw, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -372,6 +372,7 @@ func TestMigrateV5SeparatesAPISummaryFromPrivateNotes(t *testing.T) {
 	}
 	if _, err := raw.Exec(`INSERT INTO meetings(id, notes_markdown, notes_plain, creation_source, row_source)
 		VALUES ('api_note', '## Generated summary', 'Generated summary', 'granola_api', 'api'),
+		       ('mixed_note', '## Human note merged from cache', 'Human note merged from cache', 'granola_api', 'api'),
 		       ('cache_note', '## Human note', 'Human note', 'cache', 'cache')`); err != nil {
 		t.Fatal(err)
 	}
@@ -389,8 +390,14 @@ func TestMigrateV5SeparatesAPISummaryFromPrivateNotes(t *testing.T) {
 	if err := s.DB().QueryRow(`SELECT notes_markdown, summary_markdown FROM meetings WHERE id='api_note'`).Scan(&notes, &summary); err != nil {
 		t.Fatal(err)
 	}
-	if notes != "" || summary != "## Generated summary" {
+	if notes != "## Generated summary" || summary != "## Generated summary" {
 		t.Fatalf("api row notes=%q summary=%q", notes, summary)
+	}
+	if err := s.DB().QueryRow(`SELECT notes_markdown, summary_markdown FROM meetings WHERE id='mixed_note'`).Scan(&notes, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if notes != "## Human note merged from cache" || summary != "## Human note merged from cache" {
+		t.Fatalf("mixed row notes=%q summary=%q", notes, summary)
 	}
 	if err := s.DB().QueryRow(`SELECT notes_markdown, COALESCE(summary_markdown, '') FROM meetings WHERE id='cache_note'`).Scan(&notes, &summary); err != nil {
 		t.Fatal(err)

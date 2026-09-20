@@ -18,7 +18,7 @@ func TestTranscriptGetUsesOfficialPaginatedEndpoint(t *testing.T) {
 	t.Setenv("GRANOLA_API_KEY", "grn_test_key")
 	var cursors []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/notes/note_live/transcript" {
+		if r.URL.Path != "/v1/notes/not_live/transcript" {
 			t.Errorf("path = %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -33,7 +33,7 @@ func TestTranscriptGetUsesOfficialPaginatedEndpoint(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("GRANOLA_BASE_URL", srv.URL)
 
-	out, _, err := runCLISplit(t, "transcript", "get", "note_live", "--json")
+	out, _, err := runCLISplit(t, "transcript", "get", "not_live", "--json")
 	if err != nil {
 		t.Fatalf("transcript get: %v (out=%s)", err, out)
 	}
@@ -53,6 +53,31 @@ func TestTranscriptGetUsesOfficialPaginatedEndpoint(t *testing.T) {
 	}
 	if strings.Join(cursors, ",") != ",next" {
 		t.Fatalf("cursors = %v", cursors)
+	}
+}
+
+func TestTranscriptGetLegacyIDSkipsPublicAPIWithExplicitLive(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GRANOLA_CACHE_PATH", filepath.Join(home, "missing-cache.json"))
+	t.Setenv("GRANOLA_API_KEY", "grn_test_key")
+	publicRequests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		publicRequests++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	t.Setenv("GRANOLA_BASE_URL", srv.URL)
+
+	_, _, err := runCLISplit(t, "transcript", "get", "196037d9-7d28-4d4d-9c4f-c0e7e95b1aaa", "--data-source", "live", "--json")
+	if err == nil {
+		t.Fatal("expected missing internal session to fail")
+	}
+	if publicRequests != 0 {
+		t.Fatalf("legacy UUID made %d public API request(s), want 0", publicRequests)
+	}
+	if strings.Contains(err.Error(), "after setting GRANOLA_API_KEY") {
+		t.Fatalf("explicit live request stopped before the internal fallback: %v", err)
 	}
 }
 

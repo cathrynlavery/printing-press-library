@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestAuditListUsesDedicatedKeyAndPaginatesSerially(t *testing.T) {
@@ -63,6 +64,20 @@ func TestAuditListRejectsInvalidTimeBeforeRequest(t *testing.T) {
 	}
 	if requests != 0 {
 		t.Fatalf("requests = %d, want 0", requests)
+	}
+}
+
+func TestNormalizeAuditTimestampEnforcesOneYearRetentionBoundary(t *testing.T) {
+	now := time.Date(2026, time.September, 20, 0, 0, 0, 0, time.UTC)
+	got, err := normalizeAuditTimestampAt("occurred-after", "2025-09-20", now)
+	if err != nil {
+		t.Fatalf("boundary timestamp rejected: %v", err)
+	}
+	if got != "2025-09-20T00:00:00Z" {
+		t.Fatalf("normalized boundary = %q", got)
+	}
+	if _, err := normalizeAuditTimestampAt("occurred-after", "2025-09-19T23:59:59Z", now); err == nil {
+		t.Fatal("expected timestamp outside one-year retention window to fail")
 	}
 }
 

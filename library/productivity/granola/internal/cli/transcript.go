@@ -141,7 +141,12 @@ func loadTranscriptWithFlags(ctx context.Context, id string, flags *rootFlags) (
 	if err != nil {
 		return nil, "", err
 	}
-	if c.Config != nil && c.Config.AuthHeader() != "" {
+	// Public API note IDs use the not_ prefix. Legacy desktop/internal-API
+	// meetings use UUIDs, which the public endpoint cannot resolve even when
+	// GRANOLA_API_KEY is configured. Keep those requests on the internal
+	// fallback, including explicit --data-source live requests backed by the
+	// CLI-owned session.
+	if strings.HasPrefix(id, "not_") && c.Config != nil && c.Config.AuthHeader() != "" {
 		segments, err := granola.GetTranscriptAll(c, id, granola.TranscriptPageSizeMax)
 		if err != nil {
 			return nil, "", classifyAPIError(err, flags)
@@ -152,7 +157,7 @@ func loadTranscriptWithFlags(ctx context.Context, id string, flags *rootFlags) (
 		return granola.TranscriptSegments(id, segments), "live", nil
 	}
 
-	if !hasReadableCache {
+	if flags.dataSource != "live" && !hasReadableCache && !granola.HasCLISession() {
 		return nil, "", notFoundErr(fmt.Errorf("no transcript for %s in the local store; run `granola-pp-cli sync-api` after setting GRANOLA_API_KEY", id))
 	}
 	ic, err := granola.NewInternalClient()

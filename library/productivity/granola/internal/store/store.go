@@ -406,8 +406,13 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 		if current < 5 {
 			// Before v5 the API hydrate path stored summary_* in notes_*.
-			// Only API-owned rows are safe to rewrite: cache-owned rows may
-			// contain genuine human notes merged from the desktop cache.
+			// Copy those values into the new summary columns, but retain the
+			// original notes. Cache sync can merge genuine human notes into an
+			// API-owned row while deliberately preserving row_source and
+			// creation_source, so those markers cannot prove notes_* contains
+			// only generated text. Preserving the ambiguous value avoids a
+			// destructive migration; the next v1.5 API sync will populate the
+			// private-note and summary columns independently.
 			exists, err := tableExists(ctx, conn, "meetings")
 			if err != nil {
 				return err
@@ -415,8 +420,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			if exists {
 				if _, err := conn.ExecContext(ctx, `UPDATE meetings
 					SET summary_markdown = COALESCE(NULLIF(summary_markdown, ''), notes_markdown),
-					    summary_plain = COALESCE(NULLIF(summary_plain, ''), notes_plain),
-					    notes_markdown = '', notes_plain = ''
+					    summary_plain = COALESCE(NULLIF(summary_plain, ''), notes_plain)
 					WHERE row_source = 'api' AND creation_source = 'granola_api'`); err != nil {
 					return fmt.Errorf("separating api summaries from private notes: %w", err)
 				}

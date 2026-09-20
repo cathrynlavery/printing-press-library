@@ -28,6 +28,9 @@ func shellOutToCLI(cliPath func() (string, error), commandPath []string) server.
 			if !validParameterName(name) {
 				return mcplib.NewToolResultError("invalid structured tool parameter name"), nil
 			}
+			if name != "args" && blockedRootFlags[name] {
+				return mcplib.NewToolResultError("authentication and process configuration cannot be overridden through tool parameters"), nil
+			}
 		}
 		finalArgs := append([]string{}, prefixArgs...)
 		finalArgs = append(finalArgs, cliArgsFromMCP(args)...)

@@ -106,7 +106,7 @@ func TestCliArgsFromMCP_AllowsPerCommandFlags(t *testing.T) {
 }
 
 func TestStructuredParameterNamesCannotInjectFlags(t *testing.T) {
-	for _, key := range []string{"op-service-account=other", "op-service-account-token-env=OTHER_TOKEN", "op-account=other", "config=/tmp/other", "--config", "", "query\n--token"} {
+	for _, key := range []string{"op-service-account", "op-service-account-token-env", "op-account", "config", "op-service-account=other", "op-service-account-token-env=OTHER_TOKEN", "op-account=other", "config=/tmp/other", "--config", "", "query\n--token"} {
 		t.Run(key, func(t *testing.T) {
 			bin := writeShelloutHelper(t, "success")
 			handler := shellOutToCLI(func() (string, error) { return bin, nil }, nil)
@@ -117,6 +117,25 @@ func TestStructuredParameterNamesCannotInjectFlags(t *testing.T) {
 				t.Fatalf("malformed key reached the CLI: result=%#v err=%v", result, err)
 			}
 		})
+	}
+}
+
+func TestToolSchemaOmitsBlockedRootFlags(t *testing.T) {
+	root := &cobra.Command{Use: "helper"}
+	for name := range blockedRootFlags {
+		root.PersistentFlags().String(name, "", "blocked")
+	}
+	child := &cobra.Command{Use: "read"}
+	child.Flags().String("vault", "", "vault")
+	root.AddCommand(child)
+	tool := mcplib.NewTool("read", toolOptionsForFlags(child)...)
+	if _, ok := tool.InputSchema.Properties["vault"]; !ok {
+		t.Fatal("ordinary command flag missing from schema")
+	}
+	for name := range blockedRootFlags {
+		if _, ok := tool.InputSchema.Properties[name]; ok {
+			t.Errorf("blocked process configuration %q advertised in schema", name)
+		}
 	}
 }
 

@@ -2,17 +2,17 @@
   "schema_version": 1,
   "slug": "peloton",
   "cli_name": "peloton-pp-cli",
-  "version": "2026.9.11",
-  "released_at": "2026-09-20T09:17:26Z",
-  "source_commit": "acf42caa0a9ed91dfff39f9a8f5ce2a587862918",
+  "version": "2026.9.12",
+  "released_at": "2026-09-20T09:23:54Z",
+  "source_commit": "4dc07dda8d4c69f190438d6815e0f462707320d6",
   "printing_press_version": "4.28.0",
   "run_id": "20260714-231159",
   "changes": [
     {
-      "title": "fix(peloton): recover next_cursor when select drops show_next/page",
-      "pr": 2029,
-      "url": "https://github.com/mvanhorn/printing-press-library/pull/2029",
-      "commit": "acf42caa0a9ed91dfff39f9a8f5ce2a587862918"
+      "title": "fix(peloton): reject resuming a paginated cursor at a different limit",
+      "pr": 2030,
+      "url": "https://github.com/mvanhorn/printing-press-library/pull/2030",
+      "commit": "4dc07dda8d4c69f190438d6815e0f462707320d6"
     }
   ]
 }

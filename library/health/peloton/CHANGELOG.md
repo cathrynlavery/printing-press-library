@@ -2,6 +2,10 @@
 
 This file is maintained by printing-press-library release automation. Do not hand-edit release sections in normal PRs.
 
+## 2026.9.11 - 2026-09-20
+
+- fix(peloton): recover next_cursor when select drops show_next/page (#2029).
+
 ## 2026.9.10 - 2026-09-20
 
 - fix(peloton): only exempt select-named fields from FirstPageOnlyFields strip (#2025).

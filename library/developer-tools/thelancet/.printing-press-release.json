@@ -2,17 +2,17 @@
   "schema_version": 1,
   "slug": "thelancet",
   "cli_name": "thelancet-pp-cli",
-  "version": "2026.9.2",
-  "released_at": "2026-09-11T09:22:21Z",
-  "source_commit": "81f5764eda401077520268afe74913c0f21f5b7e",
+  "version": "2026.9.3",
+  "released_at": "2026-09-20T09:12:34Z",
+  "source_commit": "f7a1036f609cc349700557b9bbeacf0ec4cc662d",
   "printing_press_version": "4.24.0",
   "run_id": "20260617-072858-2f9fe13e",
   "changes": [
     {
-      "title": "fix: fail closed on ambiguous fleet write retries",
-      "pr": 1978,
-      "url": "https://github.com/mvanhorn/printing-press-library/pull/1978",
-      "commit": "81f5764eda401077520268afe74913c0f21f5b7e"
+      "title": "thelancet: make mesh usable on a real store",
+      "pr": 2024,
+      "url": "https://github.com/mvanhorn/printing-press-library/pull/2024",
+      "commit": "f7a1036f609cc349700557b9bbeacf0ec4cc662d"
     }
   ]
 }

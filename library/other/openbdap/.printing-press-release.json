@@ -2,17 +2,17 @@
   "schema_version": 1,
   "slug": "openbdap",
   "cli_name": "openbdap-pp-cli",
-  "version": "2026.9.1",
-  "released_at": "2026-09-18T09:12:36Z",
-  "source_commit": "c64f83a6caceeb8253ccbb80fb3f1680dd805a31",
+  "version": "2026.9.2",
+  "released_at": "2026-09-20T09:12:34Z",
+  "source_commit": "8d24ec617e6bbfdf98832cb2804a3b067c99a176",
   "printing_press_version": "4.32.2",
   "run_id": "20260917-200055-21d6873c",
   "changes": [
     {
-      "title": "feat(openbdap): add openbdap",
-      "pr": 2013,
-      "url": "https://github.com/mvanhorn/printing-press-library/pull/2013",
-      "commit": "c64f83a6caceeb8253ccbb80fb3f1680dd805a31"
+      "title": "feat(openbdap): localizzazione section, explicit truncation notes, UTF-8 dumps",
+      "pr": 2023,
+      "url": "https://github.com/mvanhorn/printing-press-library/pull/2023",
+      "commit": "8d24ec617e6bbfdf98832cb2804a3b067c99a176"
     }
   ]
 }

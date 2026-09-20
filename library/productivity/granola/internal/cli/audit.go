@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/mvanhorn/printing-press-library/library/productivity/granola/internal/client"
 	"github.com/mvanhorn/printing-press-library/library/productivity/granola/internal/config"
@@ -40,6 +42,19 @@ func newAuditListCmd(flags *rootFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if pageSize <= 0 || pageSize > 30 {
 				return usageErr(fmt.Errorf("--page-size must be between 1 and 30"))
+			}
+			var err error
+			if occurredBefore != "" {
+				occurredBefore, err = normalizeAuditTimestamp("occurred-before", occurredBefore)
+				if err != nil {
+					return err
+				}
+			}
+			if occurredAfter != "" {
+				occurredAfter, err = normalizeAuditTimestamp("occurred-after", occurredAfter)
+				if err != nil {
+					return err
+				}
 			}
 			c, err := newAuditClient(flags)
 			if err != nil {
@@ -98,6 +113,23 @@ func newAuditListCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&pageSize, "page-size", 10, "Events per page (1-30)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all pages serially")
 	return cmd
+}
+
+func normalizeAuditTimestamp(flagName, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	var (
+		parsed time.Time
+		err    error
+	)
+	if len(value) == len("2006-01-02") {
+		parsed, err = time.Parse("2006-01-02", value)
+	} else {
+		parsed, err = time.Parse(time.RFC3339Nano, value)
+	}
+	if err != nil {
+		return "", usageErr(fmt.Errorf("invalid --%s %q: expected YYYY-MM-DD or RFC3339 timestamp", flagName, value))
+	}
+	return granolaAPITimestamp(parsed), nil
 }
 
 func newAuditClient(flags *rootFlags) (*client.Client, error) {

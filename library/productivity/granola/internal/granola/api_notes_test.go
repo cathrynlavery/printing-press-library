@@ -547,6 +547,61 @@ func TestSyncFromAPI_HydratesSummaryAndCalendarEvent(t *testing.T) {
 	}
 }
 
+func TestSyncFromAPI_NullPrivateNotesPreserveAPIValues(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	note := decodeNote(t, noteDetailWithTranscriptJSON)
+	if _, err := SyncFromAPI(ctx, db, []APINote{note}); err != nil {
+		t.Fatalf("initial SyncFromAPI: %v", err)
+	}
+
+	note.PrivateNotesMarkdown = nil
+	note.PrivateNotesText = nil
+	note.SummaryMarkdown = "Updated summary"
+	if _, err := SyncFromAPI(ctx, db, []APINote{note}); err != nil {
+		t.Fatalf("SyncFromAPI with null private notes: %v", err)
+	}
+
+	var notesMD, notesPlain, summaryMD string
+	if err := db.QueryRowContext(ctx,
+		`SELECT notes_markdown, notes_plain, summary_markdown FROM meetings WHERE id='note_alpha'`).
+		Scan(&notesMD, &notesPlain, &summaryMD); err != nil {
+		t.Fatal(err)
+	}
+	if notesMD != "## Follow-up\n\nSend the milestone sheet." || notesPlain != "Owner follow-up: send the milestone sheet." {
+		t.Fatalf("null private notes erased stored values: %q / %q", notesMD, notesPlain)
+	}
+	if summaryMD != "Updated summary" {
+		t.Fatalf("summary_markdown = %q, want updated summary", summaryMD)
+	}
+}
+
+func TestSyncFromAPI_ExplicitEmptyPrivateNotesClearAPIValues(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	note := decodeNote(t, noteDetailWithTranscriptJSON)
+	if _, err := SyncFromAPI(ctx, db, []APINote{note}); err != nil {
+		t.Fatalf("initial SyncFromAPI: %v", err)
+	}
+
+	empty := ""
+	note.PrivateNotesMarkdown = &empty
+	note.PrivateNotesText = &empty
+	if _, err := SyncFromAPI(ctx, db, []APINote{note}); err != nil {
+		t.Fatalf("SyncFromAPI with explicit empty private notes: %v", err)
+	}
+
+	var notesMD, notesPlain string
+	if err := db.QueryRowContext(ctx,
+		`SELECT notes_markdown, notes_plain FROM meetings WHERE id='note_alpha'`).
+		Scan(&notesMD, &notesPlain); err != nil {
+		t.Fatal(err)
+	}
+	if notesMD != "" || notesPlain != "" {
+		t.Fatalf("explicit empty private notes were not applied: %q / %q", notesMD, notesPlain)
+	}
+}
+
 // TestSyncFromAPI_AttendeesDeduplicatedOnEmail: attendees[] and
 // calendar_event.invitees[] overlap. The store keys on (meeting_id, email),
 // and invitees carry email only, so the named attendee record's name must win

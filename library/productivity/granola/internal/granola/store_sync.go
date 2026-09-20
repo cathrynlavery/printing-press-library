@@ -948,11 +948,14 @@ func upsertAPINote(ctx context.Context, tx *sql.Tx, n *APINote, res *APISyncResu
 	// intentionally left alone on conflict: whichever path created the row
 	// keeps ownership, so neither path's scoped DELETE can reach the other's.
 	privateMarkdown, privatePlain := "", ""
+	privateMarkdownProvided, privatePlainProvided := 0, 0
 	if n.PrivateNotesMarkdown != nil {
 		privateMarkdown = *n.PrivateNotesMarkdown
+		privateMarkdownProvided = 1
 	}
 	if n.PrivateNotesText != nil {
 		privatePlain = *n.PrivateNotesText
+		privatePlainProvided = 1
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO meetings(
 		id, title, created_at, updated_at, started_at, ended_at, workspace_id,
@@ -967,13 +970,22 @@ func upsertAPINote(ctx context.Context, tx *sql.Tx, n *APINote, res *APISyncResu
 		started_at           = COALESCE(NULLIF(excluded.started_at,''), meetings.started_at),
 		ended_at             = COALESCE(NULLIF(excluded.ended_at,''), meetings.ended_at),
 		calendar_event_id    = COALESCE(NULLIF(excluded.calendar_event_id,''), meetings.calendar_event_id),
-		notes_markdown       = CASE WHEN meetings.row_source = 'api' THEN excluded.notes_markdown ELSE COALESCE(NULLIF(excluded.notes_markdown,''), meetings.notes_markdown) END,
-		notes_plain          = CASE WHEN meetings.row_source = 'api' THEN excluded.notes_plain ELSE COALESCE(NULLIF(excluded.notes_plain,''), meetings.notes_plain) END,
+		notes_markdown       = CASE
+			WHEN ? = 0 THEN meetings.notes_markdown
+			WHEN meetings.row_source = 'api' THEN excluded.notes_markdown
+			ELSE COALESCE(NULLIF(excluded.notes_markdown,''), meetings.notes_markdown)
+		END,
+		notes_plain          = CASE
+			WHEN ? = 0 THEN meetings.notes_plain
+			WHEN meetings.row_source = 'api' THEN excluded.notes_plain
+			ELSE COALESCE(NULLIF(excluded.notes_plain,''), meetings.notes_plain)
+		END,
 		summary_markdown     = COALESCE(NULLIF(excluded.summary_markdown,''), meetings.summary_markdown),
 		summary_plain        = COALESCE(NULLIF(excluded.summary_plain,''), meetings.summary_plain),
 		transcript_available = MAX(meetings.transcript_available, excluded.transcript_available)`,
 		n.ID, title, n.CreatedAt, n.UpdatedAt, startedAt, endedAt,
 		calEventID, privateMarkdown, privatePlain, n.SummaryMarkdown, n.SummaryText, transcriptAvail, RowSourceAPI,
+		privateMarkdownProvided, privatePlainProvided,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert api meeting %s: %w", n.ID, err)

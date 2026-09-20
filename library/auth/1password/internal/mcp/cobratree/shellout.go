@@ -24,6 +24,11 @@ func shellOutToCLI(cliPath func() (string, error), commandPath []string) server.
 			return mcplib.NewToolResultError(fmt.Sprintf("companion CLI binary not found: %v\nTried sibling lookup, API_1PASSWORD_CLI_PATH env var, and PATH.", lookupErr)), nil
 		}
 		args := req.GetArguments()
+		for name := range args {
+			if !validParameterName(name) {
+				return mcplib.NewToolResultError("invalid structured tool parameter name"), nil
+			}
+		}
 		finalArgs := append([]string{}, prefixArgs...)
 		finalArgs = append(finalArgs, cliArgsFromMCP(args)...)
 		if raw, _ := args["args"].(string); strings.TrimSpace(raw) != "" {
@@ -50,19 +55,34 @@ func shellOutToCLI(cliPath func() (string, error), commandPath []string) server.
 // target, all of which sit outside the per-command surface the agent is
 // supposed to be calling.
 var blockedRootFlags = map[string]bool{
-	"args":     true,
-	"base-url": true,
-	"client":   true,
-	"config":   true,
-	"deliver":  true,
-	"profile":  true,
-	"token":    true,
+	"args":                         true,
+	"base-url":                     true,
+	"client":                       true,
+	"config":                       true,
+	"deliver":                      true,
+	"profile":                      true,
+	"token":                        true,
+	"op-service-account":           true,
+	"op-service-account-token-env": true,
+	"op-account":                   true,
+}
+
+func validParameterName(name string) bool {
+	if name == "" || strings.HasPrefix(name, "-") {
+		return false
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 func cliArgsFromMCP(args map[string]any) []string {
 	keys := make([]string, 0, len(args))
 	for k := range args {
-		if !blockedRootFlags[k] {
+		if validParameterName(k) && !blockedRootFlags[k] {
 			keys = append(keys, k)
 		}
 	}
@@ -77,10 +97,10 @@ func cliArgsFromMCP(args map[string]any) []string {
 				out = append(out, "--"+k)
 			}
 		case float64:
-			out = append(out, "--"+k, strconv.FormatFloat(tv, 'f', -1, 64))
+			out = append(out, "--"+k+"="+strconv.FormatFloat(tv, 'f', -1, 64))
 		case string:
 			if tv != "" {
-				out = append(out, "--"+k, tv)
+				out = append(out, "--"+k+"="+tv)
 			}
 		case []any:
 			if len(tv) > 0 {
@@ -88,11 +108,11 @@ func cliArgsFromMCP(args map[string]any) []string {
 				for _, item := range tv {
 					parts = append(parts, fmt.Sprintf("%v", item))
 				}
-				out = append(out, "--"+k, strings.Join(parts, ","))
+				out = append(out, "--"+k+"="+strings.Join(parts, ","))
 			}
 		default:
 			if v != nil {
-				out = append(out, "--"+k, fmt.Sprintf("%v", v))
+				out = append(out, "--"+k+"="+fmt.Sprintf("%v", v))
 			}
 		}
 	}

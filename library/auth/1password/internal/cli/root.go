@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -18,26 +19,29 @@ import (
 )
 
 type rootFlags struct {
-	asJSON        bool
-	compact       bool
-	csv           bool
-	plain         bool
-	quiet         bool
-	dryRun        bool
-	noCache       bool
-	noInput       bool
-	idempotent    bool
-	yes           bool
-	agent         bool
-	selectFields  string
-	configPath    string
-	profileName   string
-	deliverSpec   string
-	timeout       time.Duration
-	rateLimit     float64
-	maxAge        time.Duration
-	dataSource    string
-	freshnessMeta any
+	asJSON                   bool
+	compact                  bool
+	csv                      bool
+	plain                    bool
+	quiet                    bool
+	dryRun                   bool
+	noCache                  bool
+	noInput                  bool
+	idempotent               bool
+	yes                      bool
+	agent                    bool
+	selectFields             string
+	configPath               string
+	profileName              string
+	opServiceAccount         string
+	opServiceAccountTokenEnv string
+	opAccount                string
+	deliverSpec              string
+	timeout                  time.Duration
+	rateLimit                float64
+	maxAge                   time.Duration
+	dataSource               string
+	freshnessMeta            any
 
 	// deliverBuf captures command output when --deliver is set to a
 	// non-stdout sink. Flushed to the sink after Execute returns.
@@ -154,6 +158,7 @@ Highlights (not in the official API docs):
   • cards resolve   Return card item and field references without printing card numbers, expiry values, or CVVs.
   • documents inventory   List document metadata and exact references without downloading document contents.
   • documents audit   Flag sensitive filenames, oversized docs, private-key/cert-like documents, and documents in shared vaults.
+  • documents read   Stream one exact document or attachment reference after policy checks and an explicit reveal gate.
   • share preflight   Before sharing an item, show recipient, item category, included fields, expiry, and risk.
   • share audit   Report whether existing/shareable item link inspection is supported by op or the SDK and document unsupported status clearly.
   …and 7 more — see README.md for the full list
@@ -185,10 +190,18 @@ See README.md or the bundled SKILL.md for recipes.`,
 	rootCmd.PersistentFlags().StringVar(&flags.dataSource, "data-source", "auto", "Data source for read commands: auto (live with local fallback), live (API only), local (synced data only)")
 	rootCmd.PersistentFlags().DurationVar(&flags.maxAge, "max-age", 30*time.Minute, "Maximum acceptable age of local-store data before a stderr hint suggests sync; 0 disables")
 	rootCmd.PersistentFlags().StringVar(&flags.profileName, "profile", "", "Apply values from a saved profile (see '1password-pp-cli profile list')")
+	rootCmd.PersistentFlags().StringVar(&flags.opServiceAccount, "op-service-account", "", "Use a named service-account token from OS secure storage")
+	rootCmd.PersistentFlags().StringVar(&flags.opServiceAccountTokenEnv, "op-service-account-token-env", "", "Read a service-account token from this environment variable for child op processes")
+	rootCmd.PersistentFlags().StringVar(&flags.opAccount, "op-account", "", "Set OP_ACCOUNT for child op processes using desktop/session auth")
 	rootCmd.PersistentFlags().StringVar(&flags.deliverSpec, "deliver", "", "Route output to a sink: stdout (default), file:<path>, webhook:<url>")
 	rootCmd.PersistentFlags().Float64Var(&flags.rateLimit, "rate-limit", 0, "Max requests per second (0 to disable)")
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		auth, err := resolveOpAuth(cmd.Context(), flags)
+		if err != nil {
+			return err
+		}
+		cmd.SetContext(context.WithValue(cmd.Context(), opAuthContextKey{}, auth))
 		if flags.deliverSpec != "" {
 			sink, err := ParseDeliverSink(flags.deliverSpec)
 			if err != nil {
@@ -244,6 +257,7 @@ See README.md or the bundled SKILL.md for recipes.`,
 	rootCmd.AddCommand(newDoctorCmd(flags))
 	rootCmd.AddCommand(newAgentContextCmd(rootCmd))
 	rootCmd.AddCommand(newProfileCmd(flags))
+	rootCmd.AddCommand(newServiceAccountsCmd(flags))
 	rootCmd.AddCommand(newFeedbackCmd(flags))
 	rootCmd.AddCommand(newWhichCmd(flags))
 	rootCmd.AddCommand(newImportCmd(flags))

@@ -126,6 +126,12 @@ These capabilities aren't available in any other tool for this API.
   1password-pp-cli documents audit --json
   ```
 
+- **`documents read`** — Stream one exact document or attachment reference only after policy checks and an explicit `--reveal` gate. Use this for in-memory consumers; never place document bytes in a client profile.
+
+  ```bash
+  1password-pp-cli documents read op://Engineering/Google-Analytics/service-account.json --reveal
+  ```
+
 ### Sharing
 - **`share preflight`** — Before sharing an item, show recipient, item category, included fields, expiry, and risk.
 
@@ -228,7 +234,19 @@ For automation, set a 1Password service-account token:
 export OP_SERVICE_ACCOUNT_TOKEN="<service-account-token>"
 ```
 
-For local desktop workflows, sign in with `op` using the normal 1Password CLI or desktop-app integration. This CLI warns when `OP_CONNECT_HOST` or `OP_CONNECT_TOKEN` is set because those Connect variables take precedence over service-account auth in `op`.
+Prefer named Keychain-backed tokens when an agent needs more than one 1Password account:
+
+```bash
+1password-pp-cli service-accounts add team --account example-team.1password.com
+1password-pp-cli service-accounts add sandbox --account example-sandbox.1password.com
+1password-pp-cli --op-service-account team op --agent
+```
+
+Use the masked prompt for setup, or `--token-stdin` / `--token-env NAME` without putting a token in argv. On non-macOS systems, select an existing environment variable for one invocation with `--op-service-account-token-env NAME`. Never put these auth-selection flags in `--profile`; the CLI excludes them from profile persistence and MCP shellouts.
+
+For a background macOS agent, use a consistently code-signed CLI. Migrate an entry created by an older binary once from a local interactive Terminal with `1password-pp-cli service-accounts repair-access <name> --json`; this changes only Keychain access control and never reveals the token. Do not use `--agent` for this one-time operation because it deliberately disables interactive approval.
+
+For local desktop workflows, sign in with `op` using the normal 1Password CLI or desktop-app integration. Use `--op-account` to set `OP_ACCOUNT` only for child `op` processes. Named/env service-account selection hard-fails when Connect variables are set or the selected token is unavailable.
 
 Run `1password-pp-cli doctor` to verify setup.
 
@@ -299,6 +317,8 @@ A profile is a saved set of flag values, reused across invocations. Use it when 
 ```
 
 Explicit flags always win over profile values; profile values win over defaults. `agent-context` lists all available profiles under `available_profiles` so introspecting agents discover them at runtime.
+
+Profiles never store or apply `--op-service-account`, `--op-service-account-token-env`, or `--op-account`; use the dedicated service-account selector on each invocation.
 
 ## Exit Codes
 

@@ -28,6 +28,15 @@ type profileStore struct {
 	Profiles map[string]Profile `json:"profiles"`
 }
 
+func isSecretBearingProfileFlag(name string) bool {
+	switch name {
+	case "token", "op-service-account", "op-service-account-token-env", "op-account":
+		return true
+	default:
+		return false
+	}
+}
+
 func profileStorePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -58,6 +67,23 @@ func loadProfileStore() (*profileStore, error) {
 	}
 	if s.Profiles == nil {
 		s.Profiles = map[string]Profile{}
+	}
+	// Treat the profiles file as untrusted input. Older or hand-edited files
+	// must not make auth selectors visible through profile show/use/list.
+	sanitized := false
+	for name, profile := range s.Profiles {
+		for flagName := range profile.Values {
+			if isSecretBearingProfileFlag(flagName) {
+				delete(profile.Values, flagName)
+				sanitized = true
+			}
+		}
+		s.Profiles[name] = profile
+	}
+	if sanitized {
+		if err := saveProfileStore(&s); err != nil {
+			return nil, fmt.Errorf("removing secret-bearing values from profiles: %w", err)
+		}
 	}
 	return &s, nil
 }
@@ -99,11 +125,8 @@ func ApplyProfileToFlags(cmd *cobra.Command, profile *Profile) error {
 	}
 	// Reserved flags that never come from a profile - they control profile
 	// resolution itself or are dangerous to overlay.
-	reserved := map[string]bool{
-		"profile": true, "config": true, "help": true,
-	}
 	for name, value := range profile.Values {
-		if reserved[name] {
+		if name == "profile" || name == "config" || name == "help" || isSecretBearingProfileFlag(name) {
 			continue
 		}
 		flag := cmd.Flags().Lookup(name)
@@ -186,7 +209,7 @@ present (other than --profile and --config).`,
 			// Walk inherited + local flags, capture only those the user set.
 			skip := map[string]bool{"profile": true, "config": true, "help": true, "description": true}
 			visit := func(fl *pflag.Flag) {
-				if fl.Changed && !skip[fl.Name] {
+				if fl.Changed && !skip[fl.Name] && !isSecretBearingProfileFlag(fl.Name) {
 					values[fl.Name] = fl.Value.String()
 				}
 			}

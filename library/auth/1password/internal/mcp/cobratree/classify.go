@@ -55,19 +55,20 @@ const (
 // underused tool is much smaller than the cost of a broken contract like
 // `sql` without `sync`.
 var frameworkCommands = map[string]bool{
-	"about":         true,
-	"agent-context": true,
-	"api":           true,
-	"auth":          true,
-	"completion":    true,
-	"doctor":        true,
-	"feedback":      true,
-	"help":          true,
-	"profile":       true,
-	"search":        true,
-	"sql":           true,
-	"version":       true,
-	"which":         true,
+	"about":            true,
+	"agent-context":    true,
+	"api":              true,
+	"auth":             true,
+	"completion":       true,
+	"doctor":           true,
+	"feedback":         true,
+	"help":             true,
+	"profile":          true,
+	"service-accounts": true,
+	"search":           true,
+	"sql":              true,
+	"version":          true,
+	"which":            true,
 }
 
 func classify(cmd *cobra.Command) commandKind {

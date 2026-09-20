@@ -40,6 +40,7 @@ var whichIndex = []whichEntry{
 	{Command: "cards resolve", Description: "Return card item and field references without printing card numbers, expiry values, or CVVs.", Group: "Cards", WhyItMatters: ""},
 	{Command: "documents inventory", Description: "List document metadata and exact references without downloading document contents.", Group: "Documents", WhyItMatters: ""},
 	{Command: "documents audit", Description: "Flag sensitive filenames, oversized docs, private-key/cert-like documents, and documents in shared vaults.", Group: "Documents", WhyItMatters: ""},
+	{Command: "documents read", Description: "Stream one exact document or attachment reference after policy checks and an explicit reveal gate.", Group: "Documents", WhyItMatters: "Lets provider adapters consume document bytes in memory without persisting credential files."},
 	{Command: "share preflight", Description: "Before sharing an item, show recipient, item category, included fields, expiry, and risk.", Group: "Sharing", WhyItMatters: ""},
 	{Command: "share audit", Description: "Report whether existing/shareable item link inspection is supported by op or the SDK and document unsupported status clearly.", Group: "Sharing", WhyItMatters: ""},
 	{Command: "policy check", Description: "Enforce rules such as never reading credit-card values, exact refs for production, and required owner tags.", Group: "Policy", WhyItMatters: ""},

@@ -28,3 +28,27 @@ func TestDoctorUsesLiveMigratedSchemeProbeWithoutSyncState(t *testing.T) {
 		t.Fatalf("stale Keychain remediation leaked into migrated scheme hint: %q", hint)
 	}
 }
+
+func TestDoctorHonorsRecoveredKeyOverrideWithoutSyncState(t *testing.T) {
+	support := t.TempDir()
+	t.Setenv("GRANOLA_SUPPORT_DIR", support)
+	t.Setenv("GRANOLA_SYNC_STATE_PATH", filepath.Join(t.TempDir(), "missing-state.json"))
+	t.Setenv("GRANOLA_SAFESTORAGE_KEY_OVERRIDE", "recovered-key-material")
+	if err := os.WriteFile(filepath.Join(support, "cache-v6.json.enc"), []byte("synthetic"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report := map[string]any{}
+	collectEncryptedStoreReport(report)
+	got, _ := report["encrypted_store"].(string)
+	if strings.HasPrefix(got, "DEGRADED") {
+		t.Fatalf("encrypted_store = %q, recovered key override must remain a supported cache path", got)
+	}
+	if !strings.Contains(got, "recovered key override") {
+		t.Fatalf("encrypted_store = %q, want recovered key override guidance", got)
+	}
+	hint, _ := report["encrypted_store_hint"].(string)
+	if strings.Contains(hint, "Keychain prompt") || strings.Contains(hint, "Always Allow") {
+		t.Fatalf("Keychain remediation leaked into recovered-key hint: %q", hint)
+	}
+}

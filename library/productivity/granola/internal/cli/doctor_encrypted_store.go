@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mvanhorn/printing-press-library/library/productivity/granola/internal/granola"
@@ -37,11 +38,13 @@ func collectEncryptedStoreReport(report map[string]any) {
 	supabaseEncPath := filepath.Join(supportDir, "supabase.json.enc")
 	cacheEncPresent := fileExists(encPath)
 	supabaseEncPresent := fileExists(supabaseEncPath)
+	recoveredKeyOverrideConfigured := strings.TrimSpace(os.Getenv("GRANOLA_SAFESTORAGE_KEY_OVERRIDE")) != ""
 	// Current Granola builds migrate the DEK into an entitlement-gated
 	// data-protection keychain and remove storage.dek. This file-shape probe is
 	// live, requires no Keychain prompt, and prevents a stale sync-state record
-	// from prescribing an approval flow that can no longer succeed.
-	liveSchemeMigrated := cacheEncPresent && !fileExists(filepath.Join(supportDir, "storage.dek"))
+	// from prescribing an approval flow that can no longer succeed. A recovered
+	// key override remains a supported decryption path even without storage.dek.
+	liveSchemeMigrated := cacheEncPresent && !fileExists(filepath.Join(supportDir, "storage.dek")) && !recoveredKeyOverrideConfigured
 
 	if !cacheEncPresent && !supabaseEncPresent {
 		report["encrypted_store"] = "INFO not in use (Granola pre-encryption)"
@@ -51,6 +54,10 @@ func collectEncryptedStoreReport(report map[string]any) {
 	// Both .enc paths exist (or at least one). Consult sync state.
 	state, err := granola.ReadSyncState()
 	if granola.IsSyncStateMissing(err) {
+		if recoveredKeyOverrideConfigured {
+			reportRecoveredKeyOverride(report)
+			return
+		}
 		if liveSchemeMigrated {
 			reportMigratedStore(report, "")
 			return
@@ -86,6 +93,10 @@ func collectEncryptedStoreReport(report map[string]any) {
 		// permanent, expected state, not a failure to act on. Reporting it as
 		// ERROR alongside a working CLI session read as "the CLI is broken"
 		// when meetings were syncing fine.
+		if state.LastDecryptErrorClass == "scheme_migrated" && recoveredKeyOverrideConfigured {
+			reportRecoveredKeyOverride(report)
+			return
+		}
 		if state.LastDecryptErrorClass == "scheme_migrated" || liveSchemeMigrated {
 			reportMigratedStore(report, state.LastDecryptErrorMsg)
 			return
@@ -109,6 +120,11 @@ func collectEncryptedStoreReport(report map[string]any) {
 	default:
 		report["encrypted_store"] = fmt.Sprintf("INFO sync state status: %q", state.LastDecryptStatus)
 	}
+}
+
+func reportRecoveredKeyOverride(report map[string]any) {
+	report["encrypted_store"] = "INFO recovered key override configured; run `granola-pp-cli sync` to validate cache access"
+	report["encrypted_store_hint"] = "GRANOLA_SAFESTORAGE_KEY_OVERRIDE provides the cache key; a successful sync will confirm that it matches this encrypted store."
 }
 
 func reportMigratedStore(report map[string]any, detail string) {

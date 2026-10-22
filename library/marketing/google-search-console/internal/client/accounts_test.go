@@ -4,6 +4,8 @@ import (
 	"github.com/mvanhorn/printing-press-library/library/marketing/google-search-console/internal/config"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -58,5 +60,22 @@ func TestAccountRefreshIsolation(t *testing.T) {
 	}
 	if cacheDirs[0] == cacheDirs[1] {
 		t.Fatal("shared cache")
+	}
+}
+
+func TestDefaultInvalidationPreservesNamedCaches(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	named := New(&config.Config{Account: "bestself"}, time.Second, 0)
+	if err := os.MkdirAll(named.cacheDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(named.cacheDir, "cached.json")
+	if err := os.WriteFile(marker, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacy := New(&config.Config{Account: "default"}, time.Second, 0)
+	legacy.invalidateCache()
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("default deleted named account cache", err)
 	}
 }

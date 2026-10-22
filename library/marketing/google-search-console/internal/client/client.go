@@ -60,7 +60,7 @@ func New(cfg *config.Config, timeout time.Duration, rateLimit float64) *Client {
 	// races RemoveAll, but the next command saw zero rows.
 	cacheDir := filepath.Join(homeDir, ".cache", "google-search-console-pp-cli", "responses")
 	if cfg.Account != "" && cfg.Account != "default" {
-		cacheDir = filepath.Join(cacheDir, "accounts", cfg.Account)
+		cacheDir = filepath.Join(homeDir, ".cache", "google-search-console-pp-cli", "accounts", cfg.Account, "responses")
 	}
 	httpClient := newHTTPClient(timeout, nil)
 	return &Client{

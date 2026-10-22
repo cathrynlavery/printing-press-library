@@ -24,3 +24,11 @@ func TestAccountStoreIsolation(t *testing.T) {
 		t.Fatal("accounts share a store")
 	}
 }
+
+func TestLegacyStoreFallback(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	if config.DataPath(context.Background()) != DefaultDBPath() {
+		t.Fatal("legacy fallback changed")
+	}
+}

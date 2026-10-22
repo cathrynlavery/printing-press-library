@@ -186,6 +186,9 @@ See README.md or the bundled SKILL.md for recipes.`,
 		if err != nil {
 			return err
 		}
+		if flags.configPath == "" && os.Getenv("GOOGLE_SEARCH_CONSOLE_CONFIG") == "" {
+			flags.accountName = active
+		}
 		cmd.SetContext(config.WithAccount(cmd.Context(), active))
 		return nil
 	}

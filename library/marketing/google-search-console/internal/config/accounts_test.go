@@ -73,7 +73,7 @@ func TestAccounts(t *testing.T) {
 	if err := RemoveAccount("littlemight"); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"../bad", "..", "/tmp/bad", "a/b", "A", "", "a\\b"} {
+	for _, name := range []string{"../bad", "..", "/tmp/bad", "a/b", "A", "", "a\\b", "default-account", "config.toml"} {
 		if _, err := AccountPath(name); err == nil {
 			t.Fatal("invalid name accepted")
 		}

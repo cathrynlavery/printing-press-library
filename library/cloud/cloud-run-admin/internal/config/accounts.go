@@ -121,14 +121,16 @@ func SetDefaultAccount(name string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(p); err != nil {
-		return fmt.Errorf("account is not saved: %w", err)
+	if name != "default" {
+		if _, err := os.Stat(p); err != nil {
+			return fmt.Errorf("account is not saved: %w", err)
+		}
 	}
 	dir, err := accountDir()
 	if err != nil {
 		return err
 	}
-	return writePrivate(filepath.Join(dir, "default-account"), []byte(name+"\n"))
+	return writePrivate(filepath.Join(dir, "default-account"), []byte(name+"\n"), false)
 }
 
 func RemoveAccount(name string) error {
@@ -147,7 +149,7 @@ func RemoveAccount(name string) error {
 }
 
 // Atomic replacement also fixes permissions on an existing permissive file.
-func writePrivate(p string, data []byte) error {
+func writePrivate(p string, data []byte, exclusive bool) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
@@ -163,6 +165,9 @@ func writePrivate(p string, data []byte) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
+	if exclusive {
+		return os.Link(f.Name(), p)
+	}
 	return os.Rename(f.Name(), p)
 }
 
@@ -175,13 +180,13 @@ func ImportAccount(name string, data []byte) error {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("invalid OAuth config format")
 	}
-	if cfg.AccessToken == "" && cfg.RefreshToken == "" {
-		return fmt.Errorf("OAuth config contains no saved tokens")
+	if cfg.AccessToken == "" {
+		return fmt.Errorf("OAuth config requires a saved access token; use auth login to create refreshable credentials")
 	}
 	if _, err := os.Lstat(p); !os.IsNotExist(err) {
 		return fmt.Errorf("account already exists or cannot be accessed")
 	}
-	return writePrivate(p, data)
+	return writePrivate(p, data, true)
 }
 
 type accountContextKey struct{}

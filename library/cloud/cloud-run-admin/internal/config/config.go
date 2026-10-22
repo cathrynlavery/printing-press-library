@@ -120,7 +120,7 @@ func (c *Config) save() error {
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
-	return writePrivate(c.Path, data)
+	return writePrivate(c.Path, data, false)
 }
 
 // Ensure strings import is used

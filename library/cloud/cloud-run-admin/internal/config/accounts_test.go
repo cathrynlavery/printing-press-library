@@ -85,3 +85,29 @@ func TestAccounts(t *testing.T) {
 		t.Fatal("parse redaction")
 	}
 }
+
+func TestImportAndDefaultEdgeCases(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, k := range []string{"CLOUD_RUN_ADMIN_ACCOUNT", "CLOUD_RUN_ADMIN_CONFIG", "CLOUD_RUN_ADMIN_OAUTH2C"} {
+		t.Setenv(k, "")
+	}
+	if err := ImportAccount("refresh-only", []byte("client_id='id'\nrefresh_token='refresh'")); err == nil {
+		t.Fatal("accepted unusable refresh-only account")
+	}
+	if err := SetDefaultAccount("default"); err != nil {
+		t.Fatal("cannot restore environment-only default", err)
+	}
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { results <- ImportAccount("concurrent", []byte("access_token='synthetic'")) }()
+	}
+	successes := 0
+	for i := 0; i < 2; i++ {
+		if <-results == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatal("concurrent import overwrote credentials")
+	}
+}

@@ -67,6 +67,9 @@ func newHTTPClient(timeout time.Duration, jar http.CookieJar) *http.Client {
 func New(cfg *config.Config, timeout time.Duration, rateLimit float64) *Client {
 	homeDir, _ := os.UserHomeDir()
 	cacheDir := filepath.Join(homeDir, ".cache", "cloud-run-admin-pp-cli")
+	if cfg.Account != "" && cfg.Account != "default" {
+		cacheDir = filepath.Join(cacheDir, "accounts", cfg.Account)
+	}
 	httpClient := newHTTPClient(timeout, nil)
 	return &Client{
 		BaseURL:    strings.TrimRight(cfg.BaseURL, "/"),
@@ -390,8 +393,7 @@ func (c *Client) refreshAccessToken() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("refreshing access token: HTTP %d: %s", resp.StatusCode, truncateBody(body))
+		return fmt.Errorf("refreshing access token: HTTP %d", resp.StatusCode)
 	}
 
 	var tokenResp struct {

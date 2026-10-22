@@ -17,7 +17,7 @@ import (
 var accountNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
 func accountPath(name string) (string, error) {
-	if !accountNamePattern.MatchString(name) || strings.Contains(name, "..") {
+	if !accountNamePattern.MatchString(name) || strings.Contains(name, "..") || name == "default-account" || name == "config.toml" {
 		return "", fmt.Errorf("invalid account name: use 1-63 lowercase letters, digits, dots, underscores or hyphens")
 	}
 	home, err := os.UserHomeDir()

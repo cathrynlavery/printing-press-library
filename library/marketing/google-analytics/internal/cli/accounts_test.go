@@ -160,7 +160,7 @@ func TestSavedAccountCommands(t *testing.T) {
 	if _, err := run("auth", "accounts"); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"../bad", "a/b", "", "A", "a..b"} {
+	for _, name := range []string{"../bad", "a/b", "", "A", "a..b", "default-account", "config.toml"} {
 		if _, err := accountPath(name); err == nil {
 			t.Fatal("invalid name")
 		}

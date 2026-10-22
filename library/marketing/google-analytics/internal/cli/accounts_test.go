@@ -174,3 +174,24 @@ func TestSavedAccountCommands(t *testing.T) {
 		t.Fatal("redaction", err)
 	}
 }
+
+func TestExclusiveCredentialPublication(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "credentials.json")
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { results <- writePrivate(p, []byte("synthetic-key"), true) }()
+	}
+	successes := 0
+	for i := 0; i < 2; i++ {
+		if <-results == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatal("concurrent creation overwrote a saved key")
+	}
+	info, err := os.Stat(p)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatal("credential permissions", err)
+	}
+}

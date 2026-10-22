@@ -55,9 +55,12 @@ Property resolution for data commands: --property, then GA4_PROPERTY_ID. The CLI
 		if flags.agent {
 			flags.asJSON, flags.compact, flags.noInput, flags.yes = true, true, true, true
 		}
-		_, _, err := resolveAccount(flags)
+		_, active, err := resolveAccount(flags)
 		if err != nil {
 			return err
+		}
+		if flags.credentials == "" {
+			flags.accountName = active
 		}
 		return nil
 	}

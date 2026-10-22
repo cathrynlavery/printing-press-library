@@ -76,7 +76,7 @@ func resolveAccount(f *rootFlags) (string, string, error) {
 	return p, name, err
 }
 
-func writePrivate(p string, b []byte) error {
+func writePrivate(p string, b []byte, exclusive bool) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
@@ -91,6 +91,9 @@ func writePrivate(p string, b []byte) error {
 	}
 	if err := f.Close(); err != nil {
 		return err
+	}
+	if exclusive {
+		return os.Link(f.Name(), p)
 	}
 	return os.Rename(f.Name(), p)
 }
@@ -128,7 +131,7 @@ func newAuthAddCmd(f *rootFlags) *cobra.Command {
 		if err := ga4.ValidateKey(key); err != nil {
 			return err
 		}
-		if err := writePrivate(p, b); err != nil {
+		if err := writePrivate(p, b, true); err != nil {
 			return err
 		}
 		return printJSON(cmd.OutOrStdout(), map[string]any{"added": args[0]})
@@ -191,7 +194,7 @@ func newAuthSetDefaultCmd(f *rootFlags) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if err := writePrivate(marker, []byte(args[0]+"\n")); err != nil {
+		if err := writePrivate(marker, []byte(args[0]+"\n"), false); err != nil {
 			return err
 		}
 		return printJSON(cmd.OutOrStdout(), map[string]any{"default_account": args[0]})

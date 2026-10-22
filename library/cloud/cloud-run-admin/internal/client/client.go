@@ -66,9 +66,9 @@ func newHTTPClient(timeout time.Duration, jar http.CookieJar) *http.Client {
 
 func New(cfg *config.Config, timeout time.Duration, rateLimit float64) *Client {
 	homeDir, _ := os.UserHomeDir()
-	cacheDir := filepath.Join(homeDir, ".cache", "cloud-run-admin-pp-cli")
+	cacheDir := filepath.Join(homeDir, ".cache", "cloud-run-admin-pp-cli", "responses")
 	if cfg.Account != "" && cfg.Account != "default" {
-		cacheDir = filepath.Join(cacheDir, "accounts", cfg.Account)
+		cacheDir = filepath.Join(homeDir, ".cache", "cloud-run-admin-pp-cli", "accounts", cfg.Account, "responses")
 	}
 	httpClient := newHTTPClient(timeout, nil)
 	return &Client{
